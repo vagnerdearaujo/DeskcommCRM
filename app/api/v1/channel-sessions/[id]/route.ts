@@ -10,11 +10,13 @@
 import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
 
+import { audit } from "@/lib/audit";
 import { ok, fail } from "@/lib/api/wrappers";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
+import { requireRole } from "@/lib/auth/require-role";
 import { isChannelStatus } from "@/lib/schemas/channels";
 import { createClient } from "@/lib/supabase/server";
-import { getWahaClient } from "@/lib/waha/client";
+import { getWahaClient, wahaFriendlyError } from "@/lib/waha/client";
 
 export const dynamic = "force-dynamic";
 
@@ -84,4 +86,64 @@ export async function GET(
     },
     { requestId },
   );
+}
+
+/**
+ * DELETE /api/v1/channel-sessions/[id] — remove totalmente um canal.
+ *
+ * Para a sessão no WAHA, deleta do WAHA e remove o registro do banco.
+ * Admin only. Idempotente: se o registro não existe no DB, retorna 404.
+ */
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+): Promise<Response> {
+  const requestId = randomUUID();
+  const { id } = await params;
+
+  const authz = await requireRole("admin", {
+    requestId,
+    resource: "channel_sessions",
+    allowPlatformAdmin: true,
+  });
+  if (!authz.ok) return authz.response;
+  const { user, org: activeOrg } = authz;
+
+  const supabase = await createClient();
+  const { data: session } = await supabase
+    .from("channel_sessions")
+    .select("id, waha_session_name")
+    .eq("organization_id", activeOrg.orgId)
+    .eq("id", id)
+    .maybeSingle();
+  if (!session) return fail("not_found", "Canal não encontrado.", 404, { requestId });
+
+  const waha = getWahaClient();
+  if (waha) {
+    try {
+      await waha.deleteSession(session.waha_session_name);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "unknown";
+      return fail("waha_error", wahaFriendlyError(msg), 502, { requestId });
+    }
+  }
+
+  // Remove do banco (com ou sem WAHA)
+  await supabase
+    .from("channel_sessions")
+    .delete()
+    .eq("organization_id", activeOrg.orgId)
+    .eq("id", id);
+
+  void audit({
+    action: "channel.disconnected",
+    actorUserId: user.id,
+    organizationId: activeOrg.orgId,
+    resourceType: "channel_session",
+    resourceId: id,
+    requestId,
+    metadata: { waha_session_name: session.waha_session_name },
+  });
+
+  return ok({ id, deleted: true }, { requestId });
 }

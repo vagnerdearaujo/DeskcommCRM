@@ -28,6 +28,7 @@ import {
   Phone,
   Plus,
   ShieldCheck,
+  Trash,
 } from "@/lib/ui/icons";
 
 type Variant = "success" | "warning" | "error" | "neutral";
@@ -118,6 +119,26 @@ export function ConnectionsClient({ wahaConfigured }: { wahaConfigured: boolean 
         setQr({ sessionId: c.id, title: `Reconectar ${channelLabel(c)}` });
       } catch (err) {
         toast.error(errMsg(err, "Não foi possível reconectar."));
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [invalidate],
+  );
+
+  const handleDisconnect = useCallback(
+    async (c: ChannelSession) => {
+      const label = channelLabel(c);
+      if (!window.confirm(`Tem certeza que deseja desconectar "${label}"?\n\nO WhatsApp será removido e você precisará escanear o QR code novamente para reconectar.`)) {
+        return;
+      }
+      setBusyId(c.id);
+      try {
+        await apiClient.delete(`/api/v1/channel-sessions/${c.id}`);
+        toast.success(`"${label}" desconectado.`);
+        invalidate();
+      } catch (err) {
+        toast.error(errMsg(err, "Não foi possível desconectar."));
       } finally {
         setBusyId(null);
       }
@@ -228,6 +249,20 @@ export function ConnectionsClient({ wahaConfigured }: { wahaConfigured: boolean 
                   <Button variant="outline" size="sm" onClick={() => setAntiBanId(c.id)}>
                     <ShieldCheck size={14} aria-hidden />
                     Proteção de envio
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={busyId === c.id}
+                    onClick={() => handleDisconnect(c)}
+                    className="text-error-fg hover:text-error-fg"
+                  >
+                    {busyId === c.id ? (
+                      <CircleNotch size={14} className="animate-spin" aria-hidden />
+                    ) : (
+                      <Trash size={14} aria-hidden />
+                    )}
+                    Desconectar
                   </Button>
                 </div>
               </Card>
