@@ -12,10 +12,13 @@ export const signupSchema = z
     org_name: z
       .string()
       .min(2, "Nome da empresa deve ter pelo menos 2 caracteres")
-      .max(120, "Nome da empresa deve ter no máximo 120 caracteres"),
+      .max(120, "Nome da empresa deve ter no máximo 120 caracteres")
+      .optional()
+      .or(z.literal("")),
     email: z.string().email("Email inválido"),
     password: z.string().min(8, "Senha deve ter pelo menos 8 caracteres"),
     password_confirm: z.string(),
+    invite_token: z.string().optional(),
   })
   .refine((v) => v.password === v.password_confirm, {
     path: ["password_confirm"],

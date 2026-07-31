@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -161,6 +162,23 @@ export function TenantForm({ initial }: Props) {
           <p className="text-xs text-muted-foreground">
             Adicionados ao set padrão. Cada pipeline pode ter seus próprios motivos.
           </p>
+        </div>
+
+        <div className="flex items-center justify-between rounded-lg border p-4">
+          <div className="space-y-0.5">
+            <Label htmlFor="enforce_mfa_for_all">Exigir 2FA para todos os usuários</Label>
+            <p className="text-xs text-muted-foreground">
+              Quando ativo, todos os membros da organização (incluindo agentes e
+              visualizadores) serão obrigados a configurar autenticação em duas
+              etapas. Administradores já são obrigados independentemente desta
+              opção.
+            </p>
+          </div>
+          <Switch
+            id="enforce_mfa_for_all"
+            checked={form.enforce_mfa_for_all}
+            onCheckedChange={(checked) => set("enforce_mfa_for_all", checked)}
+          />
         </div>
 
         <div className="flex justify-end">

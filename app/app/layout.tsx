@@ -23,6 +23,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   // EPIC-02: gate /app/* on completed onboarding.
   // EPIC-11: gate /app/* on org not being suspended (S-11.08).
+  // G9-09: lê enforce_mfa_for_all das settings da org.
+  let enforceMfaForAll = false;
   if (activeOrg) {
     const admin = createAdminClient();
     const { data: orgRow } = await admin
@@ -37,6 +39,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     const mode = (orgRow?.settings as { visibility_mode?: VisibilityMode } | null)
       ?.visibility_mode;
     activeOrg = { ...activeOrg, visibility_mode: mode ?? DEFAULT_VISIBILITY_MODE };
+    enforceMfaForAll =
+      typeof orgRow?.settings === "object" &&
+      orgRow?.settings !== null &&
+      (orgRow.settings as Record<string, unknown>).enforce_mfa_for_all === true;
   }
 
   // Read sidebar collapsed state SSR to avoid flash.
@@ -68,7 +74,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   const enrolled = await isMfaEnrolled();
-  const needsMfaGate = requiresMfa(activeOrg?.role, user.is_platform_admin);
+
+  const needsMfaGate = requiresMfa(activeOrg?.role, user.is_platform_admin, enforceMfaForAll);
   const shell = <AppShell sidebarCollapsed={collapsed}>{children}</AppShell>;
 
   return (

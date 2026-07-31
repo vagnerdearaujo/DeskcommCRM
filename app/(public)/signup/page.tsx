@@ -5,16 +5,27 @@ import { branding } from "@/lib/branding";
 
 export const metadata = { title: "Criar conta" };
 
-export default function SignupPage() {
+interface PageProps {
+  searchParams: Promise<{ invite?: string; email?: string }>;
+}
+
+export default async function SignupPage({ searchParams }: PageProps) {
+  const params = await searchParams;
+
   return (
     <div className="space-y-6">
       <div className="space-y-1.5 text-center">
         <h1 className="text-2xl font-semibold tracking-tight">Criar conta</h1>
         <p className="text-sm text-muted-foreground">
-          Comece a usar o {branding().name} em minutos
+          {params.invite
+            ? "Você foi convidado para usar o CRM"
+            : `Comece a usar o ${branding().name} por meio de um convite`}
         </p>
       </div>
-      <SignupForm />
+      <SignupForm
+        email={params.email ?? undefined}
+        inviteToken={params.invite ?? undefined}
+      />
       <p className="text-center text-sm text-muted-foreground">
         Já tem conta?{" "}
         <Link href="/login" className="font-medium text-foreground underline underline-offset-4">

@@ -42,6 +42,11 @@ export default async function TenantSettingsPage() {
       ? ((row.settings as { lost_reasons_extra?: string[] }).lost_reasons_extra ?? [])
       : []) as string[];
 
+  const enforceMfaForAll =
+    typeof row?.settings === "object" &&
+    row?.settings !== null &&
+    (row.settings as Record<string, unknown>).enforce_mfa_for_all === true;
+
   return (
     <div className="flex h-full flex-col gap-6 p-6">
       <header>
@@ -62,6 +67,7 @@ export default async function TenantSettingsPage() {
             dpo_email: row.dpo_email,
             privacy_policy_url: row.privacy_policy_url,
             lost_reasons_extra: lostReasonsExtra,
+            enforce_mfa_for_all: enforceMfaForAll,
           }}
         />
       )}

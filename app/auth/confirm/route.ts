@@ -47,6 +47,20 @@ export async function GET(request: NextRequest) {
     return redirectTo("/login/reset");
   }
 
+  // Se o usuário veio de um convite (invite_redirect em user_metadata),
+  // pula o provisionamento de tenant e redireciona para a página de aceite.
+  const inviteRedirect = data.user?.user_metadata?.invite_redirect as string | undefined;
+  if (inviteRedirect) {
+    await ensureTenantForUser(data.user, { skipProvision: true });
+    void audit({
+      action: "auth.signup_confirmed",
+      actorUserId: data.user.id,
+      metadata: { invite_redirect: inviteRedirect },
+      requestId,
+    });
+    return redirectTo(inviteRedirect);
+  }
+
   try {
     await ensureTenantForUser(data.user);
   } catch (e) {

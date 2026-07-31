@@ -1,10 +1,12 @@
 import { type NextRequest } from "next/server";
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 import { requirePlatformAdmin } from "@/lib/auth/requirePlatformAdmin";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
-import { randomUUID } from "node:crypto";
+import { env } from "@/lib/env";
+import { signInviteToken, INVITE_TTL_SECONDS } from "@/lib/auth/invite-token";
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -190,6 +192,7 @@ export async function POST(req: NextRequest) {
 
   const { display_name, slug, legal_name, cnpj, plan, owner_email } = parsed.data;
   const admin = createAdminClient();
+  const baseUrl = env.NEXT_PUBLIC_APP_URL;
 
   const { data: org, error: insertError } = await admin
     .from("organizations")
@@ -217,6 +220,20 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // Gera um convite HMAC para o owner_email, para que o responsável possa
+  // criar sua conta e aceitar o convite como admin da organização.
+  const ownerInviteId = randomUUID();
+  const ownerExp = Math.floor(Date.now() / 1000) + INVITE_TTL_SECONDS;
+  const ownerToken = signInviteToken({
+    invite_id: ownerInviteId,
+    email: owner_email.trim().toLowerCase(),
+    organization_id: org.id,
+    role: "admin",
+    exp: ownerExp,
+  });
+  const ownerInviteUrl = `${baseUrl.replace(/\/$/, "")}/team/accept-invite/${ownerToken}`;
+  const ownerExpiresAt = new Date(ownerExp * 1000);
+
   void audit({
     action: "tenant.created_by_platform_admin",
     actorUserId: adminCtx.user.id,
@@ -235,11 +252,21 @@ export async function POST(req: NextRequest) {
             .toString("hex")
             .slice(0, 12) + "..."
         : null,
+      owner_invite_id: ownerInviteId,
     },
   });
 
   return ok(
-    { id: org.id, slug: org.slug, display_name: org.display_name },
+    {
+      id: org.id,
+      slug: org.slug,
+      display_name: org.display_name,
+      invite: {
+        email: owner_email.trim().toLowerCase(),
+        invite_url: ownerInviteUrl,
+        expires_at: ownerExpiresAt.toISOString(),
+      },
+    },
     { status: 201, requestId },
   );
 }

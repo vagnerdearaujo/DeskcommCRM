@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/select";
 import { useCreateTenant } from "@/hooks/useCreateTenant";
 import { ApiError } from "@/lib/api/types";
+import { copyToClipboard } from "@/lib/clipboard";
 
 // ---------------------------------------------------------------------------
 // Schema (mirrors server Zod; client keeps it in sync)
@@ -75,6 +76,11 @@ export function NewTenantForm() {
   const router = useRouter();
   const createTenant = useCreateTenant();
   const [slugLocked, setSlugLocked] = useState(false);
+  const [result, setResult] = useState<{
+    id: string;
+    display_name: string;
+    invite: { email: string; invite_url: string; expires_at: string };
+  } | null>(null);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -116,7 +122,7 @@ export function NewTenantForm() {
 
   const onSubmit = handleSubmit(async (values) => {
     try {
-      const result = await createTenant.mutateAsync({
+      const res = await createTenant.mutateAsync({
         display_name: values.display_name,
         slug: values.slug,
         legal_name: values.legal_name || undefined,
@@ -125,8 +131,22 @@ export function NewTenantForm() {
         owner_email: values.owner_email,
       });
 
-      toast.success("Tenant criado com sucesso!");
-      router.push(`/admin/tenants/${result.data.id}`);
+      const d = res.data;
+      if (d.invite) {
+        setResult({
+          id: d.id,
+          display_name: d.display_name,
+          invite: {
+            email: d.invite.email,
+            invite_url: d.invite.invite_url,
+            expires_at: d.invite.expires_at,
+          },
+        });
+        toast.success("Tenant criado com sucesso!");
+      } else {
+        toast.success("Tenant criado com sucesso!");
+        router.push(`/admin/tenants/${d.id}`);
+      }
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.code === "conflict") {
@@ -141,6 +161,53 @@ export function NewTenantForm() {
   });
 
   const planValue = watch("plan");
+
+  if (result) {
+    const copyUrl = async () => {
+      const ok = await copyToClipboard(result.invite.invite_url);
+      if (ok) toast.success("Link copiado!");
+      else toast.error("Não foi possível copiar o link");
+    };
+
+    return (
+      <div className="mx-auto max-w-2xl space-y-6">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Tenant criado</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            <strong>{result.display_name}</strong> foi criado com sucesso.
+          </p>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Convite do responsável</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Compartilhe o link abaixo com <strong>{result.invite.email}</strong> para que
+              ele(a) crie sua conta e assuma como administrador do tenant.
+            </p>
+            <div className="rounded-md border bg-muted/30 p-3">
+              <code className="block break-all text-xs">{result.invite.invite_url}</code>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              O link expira em 24h. Após aceitar, o responsável poderá convitar outros
+              membros da equipe.
+            </p>
+            <div className="flex items-center gap-3 pt-2">
+              <Button onClick={copyUrl}>Copiar link</Button>
+              <Button
+                variant="outline"
+                onClick={() => router.push(`/admin/tenants/${result.id}`)}
+              >
+                Ver detalhes do tenant
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">

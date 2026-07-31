@@ -10,10 +10,21 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { signUp } from "@/app/actions/auth/signUp";
 
-export function SignupForm() {
+interface SignupFormProps {
+  /** Email preenchido a partir do convite (readonly) */
+  email?: string;
+  /** Token de convite: modo "aceitar convite" */
+  inviteToken?: string;
+  /** URL opcional para redirecionar após signup */
+  next?: string;
+}
+
+export function SignupForm({ email, inviteToken, next }: SignupFormProps) {
   const [isPending, startTransition] = useTransition();
   const [serverError, setServerError] = useState<string | null>(null);
   const [sentTo, setSentTo] = useState<string | null>(null);
+
+  const isFromInvite = !!inviteToken;
 
   const {
     register,
@@ -21,7 +32,13 @@ export function SignupForm() {
     formState: { errors },
   } = useForm<SignupInput>({
     resolver: zodResolver(signupSchema),
-    defaultValues: { org_name: "", email: "", password: "", password_confirm: "" },
+    defaultValues: {
+      org_name: "",
+      email: email ?? "",
+      password: "",
+      password_confirm: "",
+      invite_token: inviteToken ?? "",
+    },
   });
 
   const onSubmit = (values: SignupInput) => {
@@ -49,69 +66,88 @@ export function SignupForm() {
         role="status"
       >
         <p className="text-sm font-medium">Confirme seu e-mail</p>
-        <p className="text-sm text-muted-foreground">
-          Enviamos um link de confirmação para <strong>{sentTo}</strong>. Abra o
-          e-mail e clique no link para ativar sua conta.
-        </p>
+        {isFromInvite ? (
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">
+              Enviamos um link de confirmação para <strong>{sentTo}</strong>.
+              Após confirmar, você poderá aceitar o convite.
+            </p>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Enviamos um link de confirmação para <strong>{sentTo}</strong>. Abra o
+            e-mail e clique no link para ativar sua conta.
+          </p>
+        )}
       </div>
     );
   }
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
-      <div className="space-y-1.5">
-        <Label htmlFor="org_name">Nome da empresa</Label>
-        <Input
-          id="org_name"
-          type="text"
-          autoComplete="organization"
-          autoFocus
-          aria-invalid={errors.org_name ? true : undefined}
-          {...register("org_name")}
-        />
-        {errors.org_name && (
-          <p className="text-xs text-destructive">{errors.org_name.message}</p>
-        )}
-      </div>
-      <div className="space-y-1.5">
-        <Label htmlFor="email">Email</Label>
-        <Input
-          id="email"
-          type="email"
-          autoComplete="email"
-          aria-invalid={errors.email ? true : undefined}
-          {...register("email")}
-        />
-        {errors.email && (
-          <p className="text-xs text-destructive">{errors.email.message}</p>
-        )}
-      </div>
-      <div className="space-y-1.5">
-        <Label htmlFor="password">Senha</Label>
-        <Input
-          id="password"
-          type="password"
-          autoComplete="new-password"
-          aria-invalid={errors.password ? true : undefined}
-          {...register("password")}
-        />
-        {errors.password && (
-          <p className="text-xs text-destructive">{errors.password.message}</p>
-        )}
-      </div>
-      <div className="space-y-1.5">
-        <Label htmlFor="password_confirm">Confirmar senha</Label>
-        <Input
-          id="password_confirm"
-          type="password"
-          autoComplete="new-password"
-          aria-invalid={errors.password_confirm ? true : undefined}
-          {...register("password_confirm")}
-        />
-        {errors.password_confirm && (
-          <p className="text-xs text-destructive">{errors.password_confirm.message}</p>
-        )}
-      </div>
+      {isFromInvite ? (
+        // Modo convite: email fixo, sem campo org_name
+        <>
+          <div className="space-y-1.5">
+            <Label htmlFor="email">Email</Label>
+            <Input
+              id="email"
+              type="email"
+              autoComplete="email"
+              value={email}
+              disabled
+              aria-invalid={errors.email ? true : undefined}
+              {...register("email")}
+            />
+            {errors.email && (
+              <p className="text-xs text-destructive">{errors.email.message}</p>
+            )}
+          </div>
+          <input type="hidden" {...register("invite_token")} />
+        </>
+      ) : (
+        // Modo autosserviço (apenas convite): mostra mensagem
+        null
+      )}
+
+      {!isFromInvite && (
+        <div className="rounded-md border border-muted bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+          O cadastro no {process.env.NEXT_PUBLIC_APP_NAME ?? "CRM"} é feito por
+          convite. Peça a um administrador para te convidar.
+        </div>
+      )}
+
+      {isFromInvite && (
+        <>
+          <div className="space-y-1.5">
+            <Label htmlFor="password">Senha</Label>
+            <Input
+              id="password"
+              type="password"
+              autoComplete="new-password"
+              aria-invalid={errors.password ? true : undefined}
+              {...register("password")}
+            />
+            {errors.password && (
+              <p className="text-xs text-destructive">{errors.password.message}</p>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="password_confirm">Confirmar senha</Label>
+            <Input
+              id="password_confirm"
+              type="password"
+              autoComplete="new-password"
+              aria-invalid={errors.password_confirm ? true : undefined}
+              {...register("password_confirm")}
+            />
+            {errors.password_confirm && (
+              <p className="text-xs text-destructive">{errors.password_confirm.message}</p>
+            )}
+          </div>
+        </>
+      )}
+
       {serverError && (
         <div
           className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
@@ -120,9 +156,12 @@ export function SignupForm() {
           {serverError}
         </div>
       )}
-      <Button type="submit" className="w-full" disabled={isPending}>
-        {isPending ? "Criando conta..." : "Criar conta"}
-      </Button>
+
+      {isFromInvite && (
+        <Button type="submit" className="w-full" disabled={isPending}>
+          {isPending ? "Criando conta..." : "Criar conta e aceitar convite"}
+        </Button>
+      )}
     </form>
   );
 }

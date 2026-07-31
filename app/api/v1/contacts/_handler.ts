@@ -109,6 +109,7 @@ export async function listContactsHandler(
   }
   if (q.tag) query = query.contains("tags", [q.tag]);
   if (q.source) query = query.eq("source", q.source);
+  if (q.exclude_source) query = query.neq("source", q.exclude_source);
 
   if (q.cursor) {
     const c = decodeCursor(q.cursor);

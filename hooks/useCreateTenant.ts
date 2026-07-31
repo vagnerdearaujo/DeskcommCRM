@@ -20,6 +20,11 @@ export interface CreateTenantResponse {
     id: string;
     slug: string;
     display_name: string;
+    invite?: {
+      email: string;
+      invite_url: string;
+      expires_at: string;
+    };
   };
 }
 

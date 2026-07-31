@@ -27,13 +27,19 @@ type ProvisionUser = {
  * Idempotente: se o usuário já tem membership ativa (link de confirmação
  * clicado duas vezes, ou usuário que entrou antes por convite), não faz nada.
  *
+ * Com `skipProvision=true`: não cria org nem membership. Usado quando o
+ * usuário se cadastrou via convite (invite_redirect) — a membership será
+ * criada no fluxo de aceite do convite.
+ *
  * Service role é intencional aqui — o usuário ainda não pertence a nenhuma org,
  * então RLS bloquearia os INSERTs. A fonte confiável é o JWT já validado por
  * `verifyOtp` no caller (nunca o body).
  */
 export async function ensureTenantForUser(
   user: ProvisionUser,
+  options?: { skipProvision?: boolean },
 ): Promise<{ provisioned: boolean; organizationId?: string }> {
+  if (options?.skipProvision) return { provisioned: false };
   const admin = createAdminClient();
 
   const { data: existing } = await admin

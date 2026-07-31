@@ -78,6 +78,7 @@ export const tenantSchema = z.object({
     .optional()
     .or(z.literal("").transform(() => null)),
   lost_reasons_extra: z.array(z.string().min(1).max(80)).max(50).default([]),
+  enforce_mfa_for_all: z.boolean().default(false),
 });
 export type TenantInput = z.infer<typeof tenantSchema>;
 

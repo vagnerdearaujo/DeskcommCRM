@@ -13,6 +13,7 @@ export interface ContactListFilters {
   search?: string;
   tag?: string;
   source?: string;
+  exclude_source?: string;
 }
 
 export function useContactList(filters: ContactListFilters) {
@@ -24,6 +25,7 @@ export function useContactList(filters: ContactListFilters) {
       if (filters.search) qs.set("search", filters.search);
       if (filters.tag) qs.set("tag", filters.tag);
       if (filters.source) qs.set("source", filters.source);
+      if (filters.exclude_source) qs.set("exclude_source", filters.exclude_source);
       if (pageParam) qs.set("cursor", pageParam);
       qs.set("limit", "50");
       try {

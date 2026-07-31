@@ -3,7 +3,7 @@
  *
  * Behavior matrix:
  *  - Invalid/expired token         → render error
- *  - Unauthenticated user          → render CTA → /login?next=...
+ *  - Unauthenticated user          → render CTA → login ou signup com email
  *  - Authenticated, email mismatch → render mismatch + sign-out CTA
  *  - Authenticated, email match    → form posts to Server Action which inserts
  *                                    membership and redirects to /app/inbox
@@ -41,20 +41,27 @@ export default async function AcceptInvitePage({ params }: PageProps) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    const next = encodeURIComponent(`/team/accept-invite/${token}`);
     return (
       <Shell>
         <h1 className="text-xl font-semibold">Você foi convidado</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Para aceitar o convite como <strong>{payload.role}</strong>, faça login com o email{" "}
-          <strong>{payload.email}</strong>.
+          Para aceitar o convite como <strong>{payload.role}</strong>, faça login ou crie uma
+          conta com o email <strong>{payload.email}</strong>.
         </p>
-        <Link
-          href={`/login?next=${next}`}
-          className="mt-4 inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-        >
-          Fazer login
-        </Link>
+        <div className="mt-4 flex flex-col gap-3">
+          <Link
+            href={`/login?next=${encodeURIComponent(`/team/accept-invite/${token}`)}`}
+            className="inline-block rounded-md bg-primary px-4 py-2 text-center text-sm font-medium text-primary-foreground"
+          >
+            Fazer login
+          </Link>
+          <Link
+            href={`/signup?invite=${token}&email=${encodeURIComponent(payload.email)}`}
+            className="inline-block rounded-md border px-4 py-2 text-center text-sm font-medium hover:bg-accent"
+          >
+            Criar conta com {payload.email}
+          </Link>
+        </div>
       </Shell>
     );
   }
