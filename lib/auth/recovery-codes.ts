@@ -31,6 +31,11 @@ export function generateRecoveryCodes(): string[] {
   return Array.from({ length: CODE_COUNT }, () => generateRecoveryCode());
 }
 
-export function hashRecoveryCode(code: string): Buffer {
-  return createHash("sha256").update(code).digest();
+/**
+ * sha256 do código em formato hex com prefixo `\x`, que é o formato que o
+ * PostgREST aceita para colunas `bytea` (Buffer cru é serializado como
+ * `{"type":"Buffer",...}` e quebra insert/lookup — PGRST/22P02).
+ */
+export function hashRecoveryCode(code: string): string {
+  return `\\x${createHash("sha256").update(code).digest("hex")}`;
 }
