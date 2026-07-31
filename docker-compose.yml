@@ -44,8 +44,13 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - waha-data:/app/.sessions
-      - waha-media:/app/.media
+      # Bind mounts no disco físico — dados sobrevivem a docker compose down
+      - type: bind
+        source: ./data/waha/sessions
+        target: /app/.sessions
+      - type: bind
+        source: ./data/waha/media
+        target: /app/.media
     healthcheck:
       # /ping é o único endpoint sem auth desta build (api/health = 401/404).
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/ping"]
@@ -80,6 +85,10 @@ services:
       retries: 3
       start_period: 20s
 
-volumes:
-  waha-data:
-  waha-media:
+# Volumes nomeados substituídos por bind mounts (./data/...) para persistência no
+# disco físico. Os diretórios são criados automaticamente pelo Docker Engine
+# quando o container inicia, mas dados pré-existentes devem ser migrados (ver
+# docs/operations/backup-restore.md ou scripts/migrate-volumes-to-bind.sh).
+# volumes:
+#   waha-data:
+#   waha-media:

@@ -74,8 +74,12 @@ services:
       WHATSAPP_DEFAULT_ENGINE: ${WHATSAPP_DEFAULT_ENGINE:-NOWEB}
       WAHA_DASHBOARD_ENABLED: "false"    # nunca expor o dashboard num template público
     volumes:
-      - waha-data:/app/.sessions          # sessões pareadas (QR) — perder = re-parear
-      - waha-media:/app/.media
+      - type: bind
+        source: ./data/waha/sessions
+        target: /app/.sessions
+      - type: bind
+        source: ./data/waha/media
+        target: /app/.media
     logging: *default-logging
     networks: [internal]
 
@@ -155,8 +159,6 @@ services:
     networks: [internal]
 
 volumes:
-  waha-data:
-  waha-media:
   caddy-data:
   caddy-config:
 

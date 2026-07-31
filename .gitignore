@@ -71,6 +71,10 @@ playwright-report/
 .vercel
 deskcommcrm-setup-kit.zip
 
+# Dados persistentes locais (bind mounts) — NÃO versionar
+data/
+data/backups/
+
 # gov-loop — estado operacional fica FORA do git (a resposta do humano na inbox
 # e a linha 'started' do sessions.log não podem sujar o working tree; a guarda de
 # chão limpo do LOOP.md os stasharia). loop/checkpoints/evidence/ NÃO é ignorado:
