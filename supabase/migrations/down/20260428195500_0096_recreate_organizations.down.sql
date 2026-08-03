@@ -3,10 +3,12 @@
 -- =============================================================================
 -- Motivação: reverter a criação da tabela organizations e remover dados
 -- inseridos para restaurar o estado anterior à migration 0096.
--- Chamado por: scripts/rollback.sh --db ou manualmente via psql.
+-- Ferramenta MANUAL: vive em migrations/down/ de propósito — o Supabase CLI
+-- ignora subdiretórios, então um `supabase db push` nunca a executa. O
+-- rollback oficial do banco é via snapshot (scripts/rollback.sh --db).
 --
 -- Uso:
---   docker exec -i supabase_db_deskcomm-crm psql -U postgres -d postgres < down.sql
+--   docker exec -i supabase_db_deskcomm-crm psql -U postgres -d postgres < supabase/migrations/down/20260428195500_0096_recreate_organizations.down.sql
 -- =============================================================================
 
 -- 1. Remover registros inseridos pela migration 0096

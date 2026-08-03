@@ -12,10 +12,13 @@ Cada migration `NNNNNNNNNNNN_desc.sql` DEVE ter um arquivo `NNNNNNNNNNNN_desc.do
 **Estrutura:**
 ```
 supabase/migrations/
-├── 20260701000000_0001_platform_base.sql        # stub original (sem down)
-├── 20260730200000_0096_recreate_organizations.sql
-├── 20260730200000_0096_recreate_organizations.down.sql   # <── reversão
+├── 20260428195354_0001_platform_base.sql                  # stub original (sem down)
+├── 20260428195500_0096_recreate_organizations.sql
+└── down/
+    └── 20260428195500_0096_recreate_organizations.down.sql   # <── reversão
 ```
+
+**Por que em `down/`:** o Supabase CLI aplica todo arquivo que casa com `<timestamp>_name.sql` na raiz de `supabase/migrations/` — o regex do CLI (`^([0-9]+)_(.*)\.sql$`) aceita pontos, então um `.down.sql` na raiz seria executado como migration normal num `db push`/`migration up` acidental. O CLI ignora subdiretórios (`migration.IsDir() → continue`), então `down/` blinda a reversão de aplicação acidental.
 
 **O down DEVE:**
 1. Remover dados inseridos pela migration (`DELETE`)
@@ -104,7 +107,7 @@ Usar apenas para reverter a ÚLTIMA migration (dados mais recentes podem ser per
 
 ```bash
 docker exec -i supabase_db_deskcomm-crm psql -U postgres -d postgres \
-  < supabase/migrations/20260730200000_0096_recreate_organizations.down.sql
+  < supabase/migrations/down/20260428195500_0096_recreate_organizations.down.sql
 ```
 
 > ⚠ **Atenção:** down migration não restaura dados excluídos por outras migrations.
