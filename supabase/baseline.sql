@@ -8444,6 +8444,145 @@ create unique index if not exists uniq_system_update_runs_dispatched
 update public.crm_stages set name = 'Em separação' where name = 'Em separacao';
 update public.crm_stages set name = 'Pós-venda'    where name = 'Pos-venda';
 
+-- ---- channel provider (migration 0087) ----
+-- O canal deixa de ser suposto. Até aqui o sistema INTEIRO supunha WAHA (o
+-- handler de envio chamava `getAdapter("waha")` com literal; o ctx de produção
+-- do `before_send` fixava `provider: 'waha'`), e supor o canal é o que impede o
+-- seam de existir.
+--
+-- Tagged union, não flag: `provider` sozinho aceitaria uma sessão `meta_cloud`
+-- sem `meta_phone_number_id` e uma `waha` sem `waha_session_name` — as duas
+-- irresolvíveis na hora do envio, descobertas em runtime com a mensagem do
+-- cliente já aceita. O CHECK move a descoberta para o INSERT.
+--
+-- `waha_session_name` perde o NOT NULL porque ele É o identificador de um dos
+-- ramos da união; obrigatório, `meta_cloud` seria inexprimível. A UNIQUE dele
+-- continua valendo (NULLs são distintos no Postgres).
+--
+-- NÃO cria índice único de (organization_id, phone_number): a trava já existe
+-- desde o snapshot — `channel_sessions_phone_per_org_unique ... DEFERRABLE
+-- INITIALLY DEFERRED` — e já responde a "um número vive em UM provider", porque
+-- não olha o provider. Duplicá-la custaria checagem em toda escrita e colocaria
+-- uma trava NÃO-deferível ao lado de uma deferível, quebrando no meio qualquer
+-- transação que hoje troca números entre sessões.
+--
+-- Auto-curativo para o `update.sh` de clone: o default preenche as linhas
+-- existentes no mesmo ALTER e `waha_session_name` era NOT NULL antes desta
+-- mudança — então TODA linha pré-existente já satisfaz o ramo 'waha' quando o
+-- CHECK nasce. Não há dado a deduplicar antes da constraint.
+alter table public.channel_sessions
+  add column if not exists provider text not null default 'waha',
+  add column if not exists meta_phone_number_id text,
+  add column if not exists meta_waba_id text,
+  add column if not exists meta_token_encrypted bytea;
+
+alter table public.channel_sessions alter column waha_session_name drop not null;
+
+do $$ begin
+  alter table public.channel_sessions add constraint channel_sessions_provider_check
+    check (provider = any (array['waha'::text, 'meta_cloud'::text]));
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  alter table public.channel_sessions add constraint channel_sessions_provider_ref_check check (
+    (provider = 'waha'       and waha_session_name    is not null) or
+    (provider = 'meta_cloud' and meta_phone_number_id is not null)
+  );
+exception when duplicate_object then null; end $$;
+
+comment on column public.channel_sessions.provider is
+  'Canal desta sessão. Vocabulário espelhado em lib/channels/types.ts → ChannelProvider (cobrado por tests/invariants/vocabulario-banco-x-typescript.test.ts).';
+
+-- ---- meta templates (migration 0088) ----
+-- Espelho idempotente da migration 0088. Racional completo no arquivo da
+-- migration; aqui fica o que o install.sh/update.sh precisa executar.
+
+create table if not exists public.meta_templates (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  waba_id text not null,
+  name text not null,
+  language text not null,
+  status text not null,                 -- APPROVED | PENDING | REJECTED | PAUSED | DISABLED
+  category text,
+  rejected_reason text,
+  quality_score text,
+  -- Payload de `components` como a Meta o devolveu. É a ENTRADA de
+  -- deriveTemplateContract; guardar o derivado seria a segunda fonte da verdade
+  -- que esta fase inteira existe para eliminar.
+  components jsonb not null,
+  -- sha256 do contrato DERIVADO (não do jsonb cru): muda quando parâmetro muda,
+  -- não muda quando alguém corrige uma vírgula no texto.
+  contract_hash text not null,
+  parameter_format text not null default 'POSITIONAL',
+  synced_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+do $$ begin
+  alter table public.meta_templates
+    add constraint meta_templates_parameter_format_check
+    check (parameter_format in ('POSITIONAL', 'NAMED'));
+exception when duplicate_object then null; end $$;
+
+-- COMMENTs ficam no banco: aparecem em `\d+` e no Supabase Studio, onde quem
+-- inspeciona a tabela não tem este arquivo à mão.
+comment on table public.meta_templates is
+  'Espelho local dos templates hospedados na Meta (migration 0088). Derivado, nunca autoritativo: o schema vive na Meta. contract_hash sai de lib/channels/meta/contract-hash.ts e é a âncora da trava por obsolescência.';
+comment on column public.meta_templates.status is
+  'Vocabulário ABERTO da Meta — deliberadamente SEM CHECK (ela cria estado novo sem avisar; CHECK quebraria o update.sh do clone). Espelhado em lib/channels/meta/template-sync.ts.';
+comment on column public.meta_templates.contract_hash is
+  'SHA-256 do contrato DERIVADO (slots + parameter_format), não do JSON cru. Config de disparo guarda este hash; divergência = config obsoleta.';
+comment on column public.meta_templates.parameter_format is
+  'Valor NORMALIZADO por deriveTemplateContract, não o cru da Meta — por isso TEM CHECK, ao contrário de status.';
+
+create unique index if not exists meta_templates_org_waba_name_lang_uniq
+  on public.meta_templates (organization_id, waba_id, name, language);
+
+-- `name` no fim serve a listagem ordenada da tela sem sort extra (índice dele,
+-- superset do meu — combinado em vez de escolhido).
+create index if not exists meta_templates_org_status_idx
+  on public.meta_templates (organization_id, status, name);
+
+alter table public.meta_templates enable row level security;
+
+drop policy if exists tenant_isolation_meta_templates_all on public.meta_templates;
+create policy tenant_isolation_meta_templates_all on public.meta_templates
+  for all
+  using (organization_id in (select public.fn_user_org_ids()))
+  with check (organization_id in (select public.fn_user_org_ids()));
+
+-- ---- message type: template (migration 0091) ----
+-- Espelho idempotente. Racional completo no arquivo da migration: `template` NAO
+-- podia ser gravado como 'text' porque o tipo e a unica coluna que carrega custo
+-- (template e cobrado por entrega), conformidade de janela, e o que o contato viu.
+-- Backfill: nenhum por construcao — o conjunto antigo e subconjunto do novo.
+
+do $$ begin
+  alter table public.messages drop constraint if exists messages_type_check;
+  alter table public.messages add constraint messages_type_check
+    check (type = any (array[
+      'text', 'image', 'video', 'audio', 'document', 'sticker',
+      'location', 'contact', 'reaction', 'system',
+      -- novo: envio de template aprovado (canal oficial, fora da janela de 24h)
+      'template'
+    ]));
+end $$;
+
+-- Nome do template disparado. Fica em coluna, não só em `metadata`, porque é o que
+-- responde "quanto gastei com o template X?" sem varrer jsonb — e porque `metadata`
+-- é vocabulário aberto por desenho, o que tornaria a consulta uma aposta.
+alter table public.messages
+  add column if not exists template_name text,
+  add column if not exists template_language text;
+
+comment on column public.messages.template_name is
+  'Nome do template da Meta quando type = template. Null nos demais tipos. Em coluna (não em metadata) porque é a chave de custo e de auditoria de janela.';
+
+create index if not exists messages_template_idx
+  on public.messages (organization_id, template_name)
+  where template_name is not null;
 -- ---- "não consegui comparar" não é "está em dia" (migration 0093) ----
 --
 -- Sem esta coluna, o agente que falha ao comparar (clone raso sem conseguir
@@ -8466,3 +8605,113 @@ alter table public.system_version
   add column if not exists has_known_release boolean not null default true;
 comment on column public.system_version.has_known_release is
   'false quando o agente do host nunca viu nenhuma tag v* no repositório (fork sem releases). Default true preserva o comportamento anterior para agentes antigos que ainda não enviam este campo.';
+
+-- ---- orçamento de IA conta o runtime real (migration 0095) ----
+-- O gatilho de consumo existia só em ai_invocations (workers legados); o
+-- agent-engine grava em llm_calls, então o contador ficava zerado e o alarme
+-- de 80% / pausa em 100% nunca disparavam. Idempotente.
+drop trigger if exists trg_llm_calls_budget on public.llm_calls;
+create trigger trg_llm_calls_budget
+  after insert on public.llm_calls
+  for each row execute function public.fn_update_budget_consumption();
+
+insert into public.ai_budgets (organization_id, current_month_consumed_cents)
+select o.id,
+       coalesce((select sum(cost_cents) from public.llm_calls c
+                 where c.organization_id = o.id and c.created_at >= date_trunc('month', now())), 0)
+     + coalesce((select sum(cost_cents) from public.ai_invocations i
+                 where i.organization_id = o.id and i.created_at >= date_trunc('month', now())), 0)
+from public.organizations o
+on conflict (organization_id) do update
+set current_month_consumed_cents = excluded.current_month_consumed_cents,
+    updated_at = now();
+
+-- ---- modelo de LLM padrão da organização (migration 0096) ----
+-- Sem isto o caminho GENÉRICO do turno (documentado em resolve-turn-agent.ts)
+-- fica sem modelo e o turno morre com 'modelo LLM não definido'. Idempotente.
+update public.organizations o
+set settings = jsonb_set(
+      coalesce(o.settings, '{}'::jsonb),
+      '{llm}',
+      coalesce(o.settings->'llm', '{}'::jsonb)
+        || jsonb_build_object(
+             'provider', coalesce(o.settings->'llm'->>'provider', 'anthropic'),
+             'default_model', coalesce(
+               (select m.model_id from public.ai_models m
+                where m.provider = coalesce(o.settings->'llm'->>'provider', 'anthropic')
+                  and m.is_default_for_provider
+                  and m.deprecated_at is null
+                limit 1),
+               'claude-sonnet-4-6'
+             )
+           ),
+      true
+    )
+where coalesce(o.settings->'llm'->>'default_model', '') = '';
+
+-- Organização nova já nasce configurada: o mesmo seed que cria o funil padrão
+-- passa a semear o modelo.
+CREATE OR REPLACE FUNCTION "public"."fn_seed_org_llm_defaults"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+begin
+  if coalesce(new.settings->'llm'->>'default_model', '') = '' then
+    new.settings := jsonb_set(
+      coalesce(new.settings, '{}'::jsonb),
+      '{llm}',
+      coalesce(new.settings->'llm', '{}'::jsonb)
+        || jsonb_build_object(
+             'provider', 'anthropic',
+             'default_model', coalesce(
+               (select m.model_id from public.ai_models m
+                where m.provider = 'anthropic' and m.is_default_for_provider
+                  and m.deprecated_at is null limit 1),
+               'claude-sonnet-4-6'
+             )
+           ),
+      true
+    );
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_seed_org_llm_defaults on public.organizations;
+create trigger trg_seed_org_llm_defaults
+  before insert on public.organizations
+  for each row execute function public.fn_seed_org_llm_defaults();
+
+-- ---- limiar do RAG calibrado (migration 0097) ----
+-- 0.72 descartava toda parafrase; medido: relevante 0.49-0.85, irrelevante 0.27.
+alter table public.ai_agents
+  alter column config set default jsonb_build_object(
+    'temperature', 0.3, 'max_tokens', 1024, 'rag_top_k', 5,
+    'rag_similarity_threshold', 0.40, 'context_message_window', 20,
+    'confidence_threshold', 0.55, 'sentiment_threshold', 0.3,
+    'zero_data_retention', false);
+
+-- Cura quem está com o padrão antigo INTACTO. Quem já ajustou o valor na mão
+-- não é tocado.
+update public.ai_agents
+set config = jsonb_set(config, '{rag_similarity_threshold}', '0.40'::jsonb)
+where (config->>'rag_similarity_threshold')::numeric = 0.72;
+
+-- Default da função de busca, para quem chama sem passar o limiar.
+CREATE OR REPLACE FUNCTION "public"."retrieve_top_k_chunks"("p_organization_id" "uuid", "p_kb_version_id" "uuid", "p_embedding" "public"."vector", "p_k" integer DEFAULT 5, "p_threshold" real DEFAULT 0.40) RETURNS TABLE("chunk_id" "uuid", "knowledge_source_id" "uuid", "content" "text", "similarity" real, "metadata" "jsonb")
+    LANGUAGE "sql" STABLE SECURITY DEFINER
+    SET "search_path" TO 'public', 'pg_temp'
+    AS $$
+  select
+    c.id as chunk_id,
+    c.knowledge_source_id,
+    c.content,
+    (1 - (c.embedding <=> p_embedding))::real as similarity,
+    c.metadata
+  from public.ai_chunks c
+  where c.organization_id = p_organization_id
+    and c.kb_version_id   = p_kb_version_id
+    and (1 - (c.embedding <=> p_embedding)) >= p_threshold
+  order by c.embedding <=> p_embedding asc
+  limit greatest(p_k, 0);
+$$;

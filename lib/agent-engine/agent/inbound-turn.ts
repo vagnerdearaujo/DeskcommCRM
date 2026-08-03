@@ -94,7 +94,10 @@ import {
 } from './skills';
 import { readSkillReference, skillHasReferences } from './skill-references';
 import { READ_ONLY_TOOLS, wrapToolsWithBreaker, type ToolBreakerThresholds } from './tool-breaker';
-import { runBeforeSend } from '../guardrails/before-send';
+import { loadChannelProvider, runBeforeSend } from '../guardrails/before-send';
+import { isStatusSendable } from '../../channels/meta/template-binding';
+import { capabilitiesOf } from '@/lib/channels/capabilities';
+import { renderTemplateBody } from '@/lib/channels/meta/render-template';
 import { sendInBubbles } from './split-message';
 import type { DisclosureMode } from '../guardrails/disclosure/template';
 import { decidePromise } from '../guardrails/promise/engine';
@@ -102,6 +105,8 @@ import { loadPromiseTable } from '../guardrails/promise/table';
 import { classifyPromise } from '../guardrails/promise/semantic';
 import { diffCheckpoint } from '@/lib/leads/checkpoint-diff';
 import { emitAgentActivityForContact } from '@/lib/leads/agent-activity';
+import { resolveActiveLeadForContact, type LeadCandidate } from '@/lib/leads/active-lead';
+import { recalculaScoreDoLead } from '@/lib/leads/score-writer';
 import {
   JAILBREAK_ESCALATION_LEVEL,
   classifyJailbreak,
@@ -246,6 +251,21 @@ export const AGENT_TOOL_DEFS = {
     inputSchema: z.object({
       case_id: z.string().describe('id do caso aberto'),
       info: z.string().describe('a informação colhida do lead'),
+    }).passthrough(),
+  },
+  send_template: {
+    description:
+      'Envia um TEMPLATE aprovado do WhatsApp. Use SOMENTE quando o send_message for recusado ' +
+      'porque a janela de 24 horas com o contato fechou — a mensagem de erro diz quando é o caso. ' +
+      'Você precisa do nome exato do template, do idioma e de um valor para CADA parâmetro. ' +
+      'Se faltar valor, a resposta diz quais e você pode chamar de novo; qualquer outro erro ' +
+      'significa que um humano precisa agir — encerre o turno sem insistir.',
+    inputSchema: z.object({
+      template_name: z.string().min(1).describe('nome exato do template, como aprovado na Meta'),
+      language: z.string().min(2).describe('código do idioma, ex.: pt_BR'),
+      values: z
+        .record(z.string(), z.string())
+        .describe('valor de cada parâmetro, na chave que a tela de templates mostra (ex.: "1", "2")'),
     }).passthrough(),
   },
 } as const;
@@ -982,6 +1002,108 @@ export async function runAgentTurn(
         }
       },
     }),
+    send_template: tool({
+      ...AGENT_TOOL_DEFS.send_template,
+      execute: async ({ template_name, language, values }) => {
+        // O texto RENDERIZADO vai como `body` da cadeia: os gates de promessa,
+        // spinning e disclosure avaliam exatamente o que o contato vai ler. Sem
+        // isso, "usar template" seria a forma de escapar dos guardrails de conteúdo.
+        const { rows } = await pool.query<{
+          components: unknown;
+          parameter_format: string;
+          status: string;
+        }>(
+          `select components, parameter_format, status from meta_templates
+            where organization_id = $1 and name = $2 and language = $3`,
+          [tenantId, template_name, language],
+        );
+        const linha = rows[0];
+        if (linha === undefined) {
+          return {
+            ok: false,
+            error: {
+              code: 'template_desconhecido',
+              message:
+                `não existe template "${template_name}" em ${language} nesta conta. ` +
+                'Encerre o turno; um humano precisa configurá-lo.',
+            },
+          };
+        }
+        // "Existe" não é "pode ser disparado". A regra vive em template-binding.ts e
+        // o caminho HUMANO já a respeitava (recusa `not_approved` no menu do composer);
+        // este caminho não a consultava — e é o que age SEM humano olhando. Um template
+        // PENDING ou REJECTED iria à Graph API, voltaria erro genérico, e o modelo
+        // trataria como falha de infraestrutura em vez de configuração pendente.
+        //
+        // Erro SEPARADO de `template_desconhecido` de propósito: as duas causas pedem
+        // ações humanas diferentes — criar o template, ou esperar/consertar a análise
+        // da Meta. Colapsá-las manda o operador procurar no lugar errado.
+        if (!isStatusSendable(linha.status)) {
+          return {
+            ok: false,
+            error: {
+              code: 'template_nao_aprovado',
+              message:
+                `o template "${template_name}" existe mas está ${linha.status} na Meta — ` +
+                'só um template APPROVED pode ser disparado. Encerre o turno; ' +
+                'um humano precisa resolver a aprovação.',
+            },
+          };
+        }
+
+        const rendered = renderTemplateBody(linha.components, values, {
+          name: template_name,
+          language,
+          parameterFormat: linha.parameter_format,
+        });
+
+        const chain = await runBeforeSend({
+          pool,
+          log: runLog,
+          tenantId,
+          leadId,
+          jobId: job.id,
+          channelSessionId: input.channelSessionId,
+          body: rendered,
+          // Só ESTE gate muda; stop, LGPD e pacing continuam valendo integralmente.
+          isTemplate: true,
+          optedOutThisTurn,
+          crmDailyLimit: null,
+          now: clock(),
+          sleep: deps.sleep,
+          lgpd,
+          send: (finalBody: string) => {
+            seq += 1;
+            return channel.send({
+              tenantId,
+              leadId,
+              jobId: job.id,
+              seq,
+              conversationId: input.conversationId,
+              body: finalBody,
+              template: { name: template_name, language, values },
+            });
+          },
+        });
+
+        if (chain.status === 'vetoed') {
+          return { ok: false, error: { code: chain.code, message: chain.message } };
+        }
+        const outcome = chain.outcome;
+        outcomes.push(outcome);
+        if (outcome.kind === 'sent' || outcome.kind === 'already_sent') {
+          return {
+            ok: true,
+            status: 'enviada',
+            message_id: outcome.messageId,
+            // Explícito: sem isso o modelo tende a emendar texto livre depois do
+            // template — que a janela fechada recusaria.
+            message: 'template enviado. Não escreva mais nada neste turno.',
+          };
+        }
+        return { ok: true, status: 'aceita_aguardando_canal' };
+      },
+    }),
     search_knowledge: tool({
       ...AGENT_TOOL_DEFS.search_knowledge,
       execute: async ({ query }) => {
@@ -1454,6 +1576,16 @@ export async function runAgentTurn(
     delete rawTools.search_knowledge;
   }
 
+  // A ferramenta de template só entra em canal que EXIGE template fora da janela.
+  // Num canal que fala livre a qualquer hora ela nunca teria uso — e tool inútil no
+  // prompt não é neutra: gasta contexto e degrada a escolha do modelo.
+  {
+    const provider = await loadChannelProvider(pool, tenantId, input.channelSessionId);
+    if (!capabilitiesOf(provider).requiresTemplates) {
+      delete rawTools.send_template;
+    }
+  }
+
   // 2B-tools: tools do catálogo MCP habilitadas NA TELA entram no run (audit +
   // role/scope da ponte nativa; envio e handoff do catálogo são bloqueados —
   // ver edge/crm/mcp-tools.ts). As 8 tools do engine têm precedência de nome.
@@ -1722,6 +1854,52 @@ export async function runAgentTurn(
         error: err instanceof Error ? err.name : 'unknown',
       });
     }
+  }
+
+  // ── A NOTA DO NEGÓCIO ──────────────────────────────────────────────────────
+  //
+  // O turno acabou de mexer em TUDO que a fórmula lê: compromissos e objeções
+  // (o checkpoint acima) e a qualificação BANT (`lead_state`, escrita pelo
+  // update_lead_state do modelo). Recalcular aqui é recalcular no instante em
+  // que os sinais mudaram — não há evento melhor.
+  //
+  // ⚠️ POR QUE ISTO EXISTE: `recalculaScoreDoLead` estava escrita, testada e
+  // com constraint no banco exigindo o `reason` — e SEM UM ÚNICO CHAMADOR no
+  // repositório inteiro. Nenhuma nota jamais foi calculada. O modo de falha era
+  // mudo: o card simplesmente não mostrava número, e "não tem nota ainda" é
+  // indistinguível de "ninguém nunca calcula".
+  //
+  // Fora do `if (mudanca.emit)` DE PROPÓSITO: o BANT muda em turnos que não
+  // mexem no checkpoint, e esses turnos também mudam a nota. Amarrar o cálculo
+  // à emissão da atividade faria a nota envelhecer em silêncio — o mesmo
+  // defeito, um andar acima.
+  //
+  // Falha aqui não derruba o turno: nota é derivado, e o próximo turno
+  // recalcula. O que não pode é o cliente ficar sem resposta por causa dela.
+  try {
+    const alvo = await resolveActiveLeadForContact(
+      (
+        await pool.query<LeadCandidate>(
+          `select l.id, l.organization_id, l.pipeline_id, l.status,
+                  l.last_activity_at, l.created_at
+             from crm_leads l
+            where l.organization_id = $1 and l.contact_id = $2`,
+          [tenantId, leadId],
+        )
+      ).rows,
+    );
+    if (alvo.routed) {
+      const r = await recalculaScoreDoLead(pool, tenantId, alvo.leadId);
+      runLog.info('score do negócio recalculado', {
+        lead_id: alvo.leadId,
+        gravou: r.gravou,
+        ...(r.motivo !== undefined ? { motivo: r.motivo } : {}),
+      });
+    }
+  } catch (err) {
+    runLog.error('falha ao recalcular score (segue)', {
+      error: err instanceof Error ? err.name : 'unknown',
+    });
   }
 
   // F3-11: divergência classificador×modelo. O classificador sugeriu um estágio; se o

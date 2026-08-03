@@ -11,6 +11,7 @@
 import Link from "next/link";
 
 import { verifyInviteToken } from "@/lib/auth/invite-token";
+import { authRateLimited, AUTH_LIMITS } from "@/lib/auth/rate-limit";
 import { createClient } from "@/lib/supabase/server";
 import { acceptInviteAction } from "@/app/actions/team/acceptInvite";
 
@@ -22,6 +23,22 @@ interface PageProps {
 
 export default async function AcceptInvitePage({ params }: PageProps) {
   const { token } = await params;
+
+  // O gargalo de enumeração é AQUI, não no aceite: a rota é pública e cada
+  // GET testa um token. Sem teto, varrer o espaço de tokens sai de graça
+  // (issue #64). Barrar antes de verificar mantém a resposta indistinguível
+  // entre token válido e inválido para quem está varrendo.
+  if (await authRateLimited("invite_accept", null, AUTH_LIMITS.invite_accept)) {
+    return (
+      <Shell>
+        <h1 className="text-xl font-semibold">Muitas tentativas</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Aguarde alguns minutos e abra o link do convite de novo.
+        </p>
+      </Shell>
+    );
+  }
+
   const payload = verifyInviteToken(token);
 
   if (!payload) {

@@ -118,7 +118,7 @@ const envSchema = z.object({
   CACHE_HIT_ALERT_MIN_RUNS: z.coerce.number().int().positive().default(20),
   // RAG/embedding das notas (recall vetorial) — opcional; sem chave, só BM25.
   RAG_TOP_K: z.coerce.number().int().positive().default(5),
-  RAG_SIMILARITY_THRESHOLD: z.coerce.number().min(0).max(1).default(0.72),
+  RAG_SIMILARITY_THRESHOLD: z.coerce.number().min(0).max(1).default(0.40),
   RAG_MAX_TOKENS: z.coerce.number().int().positive().default(2_000),
   RAG_EMBEDDING_MODEL: z.string().min(1).default('text-embedding-3-small'),
   RAG_EMBEDDING_API_KEY: z.string().min(1).optional(),

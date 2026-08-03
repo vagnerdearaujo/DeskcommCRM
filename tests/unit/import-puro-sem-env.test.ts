@@ -66,7 +66,14 @@ function importaComAmbienteLimpo(modulo: string): { ok: boolean; erro: string } 
 }
 
 describe("módulo de função pura importa sem ambiente", () => {
-  it("o aparato consegue detectar o defeito (controle positivo)", () => {
+  // Timeout explícito: estes dois casos abrem um PROCESSO FILHO (`npx tsx`), que
+  // custa ~5s em máquina livre e mais em máquina carregada — acima do padrão de
+  // 5s do vitest. O timeout interno do execFileSync já é 120s; quem estourava
+  // era o do vitest, e o teste ficava vermelho por LENTIDÃO, não por defeito.
+  // Justamente o estrago que o cabeçalho deste arquivo descreve: main vermelha
+  // travando PR de quem não mexeu em nada (aconteceu no PR #81, que só mexia em
+  // documentação).
+  it("o aparato consegue detectar o defeito (controle positivo)", { timeout: 60_000 }, () => {
     // Sem isto, um `npx tsx` que falhasse por qualquer motivo daria "ok:false"
     // e o teste principal ficaria vermelho pelo motivo errado — ou, pior, um
     // script que sempre imprime OK deixaria tudo verde medindo nada.
@@ -75,7 +82,7 @@ describe("módulo de função pura importa sem ambiente", () => {
     expect(controle.ok, `esperava @/lib/env FALHAR sem env, veio: ${controle.erro}`).toBe(false);
   });
 
-  it.each(MODULOS_PUROS)("%s importa com ambiente vazio", (modulo) => {
+  it.each(MODULOS_PUROS)("%s importa com ambiente vazio", { timeout: 60_000 }, (modulo) => {
     const r = importaComAmbienteLimpo(modulo);
     expect(
       r.ok,

@@ -58,6 +58,23 @@ Ao finalizar um epic:
 4. Abrir PR contra `main`. Description deve referenciar o epic e listar evidências (logs/screenshots dos testes).
 5. CI deve passar antes de merge. Obrigatórios: `verify`, `invariants` (isolamento RLS) e `build-and-size`.
 
+### Pegando uma issue — o protocolo
+
+Existe porque já falhamos nisto: em 2026-07-30 abrimos uma issue, um contribuidor
+começou a resolvê-la, e um mantenedor entregou a mesma correção **21 segundos antes**
+sem que nenhum dos dois pudesse ver o outro. O trabalho dele foi para o lixo. As regras
+abaixo são para que isso não se repita.
+
+1. **Comente "pego esta" antes de codar.** Uma linha basta. Um mantenedor te atribui a
+   issue — a partir daí ela é sua e ninguém mais mexe.
+2. **Issue com pessoa atribuída não se duplica.** Se você quer ajudar mesmo assim,
+   comente oferecendo; não abra PR concorrente.
+3. **Mantenedor não implementa issue marcada `good first issue` ou `help wanted`** sem
+   antes se atribuir a ela publicamente. Se você vir uma dessas sem dono, ela é sua para
+   pegar — essa é a garantia que damos em troca do passo 1.
+4. **Sem resposta em 48h depois do "pego esta"?** Comece assim mesmo e diga no PR. A
+   demora é nossa, o custo não pode ser seu.
+
 ### Se você está contribuindo de fora (fork) — leia isto
 
 Duas coisas vão parecer erro seu e não são:

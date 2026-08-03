@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { signupSchema, type SignupInput } from "@/lib/auth/schemas";
 import { audit, hashEmail } from "@/lib/audit";
+import { authRateLimited, AUTH_LIMITS } from "@/lib/auth/rate-limit";
 import { env } from "@/lib/env";
 
 export type SignUpResult =
@@ -39,6 +40,12 @@ export async function signUp(input: SignupInput): Promise<SignUpResult> {
   const requestId = hdrs.get("x-request-id");
   const ip = hdrs.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
   const userAgent = hdrs.get("user-agent") ?? null;
+
+  // Criar conta é fluxo raro por pessoa: teto baixo por IP evita fábrica de
+  // organizações (cada signup provisiona tenant). Issue #64.
+  if (await authRateLimited("signup", null, AUTH_LIMITS.signup)) {
+    return { ok: false, error: "rate_limited" };
+  }
 
   const supabase = await createClient();
 

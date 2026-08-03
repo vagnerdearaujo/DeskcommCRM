@@ -5,6 +5,8 @@
 export type AuditAction =
   | "auth.login_success"
   | "auth.login_failed"
+  /** Teto de tentativas barrou antes de chegar ao provedor (issue #64). */
+  | "auth.login_rate_limited"
   | "auth.logout"
   | "auth.mfa_enrolled"
   | "auth.mfa_success"

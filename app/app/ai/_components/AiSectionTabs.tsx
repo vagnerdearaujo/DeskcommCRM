@@ -10,6 +10,7 @@ const TABS = [
   { href: "/app/ai/knowledge/sources", label: "Conhecimento" },
   { href: "/app/ai/usage", label: "Uso" },
   { href: "/app/ai/inbox", label: "Inbox" },
+  { href: "/app/ai/proposals", label: "Propostas" },
   { href: "/app/ai/cases", label: "Casos" },
 ];
 

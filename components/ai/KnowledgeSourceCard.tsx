@@ -1,9 +1,11 @@
 "use client";
+import { useState } from "react";
 import { HelpCircle, ShieldCheck, MessageSquare, Package, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SourceStatusBadge, deriveBadgeStatus } from "@/components/ai/SourceStatusBadge";
+import { NovaFonteDialog } from "@/components/ai/NovaFonteDialog";
 import type { SourceRow } from "@/hooks/ai/useKnowledgeSources";
 
 export type KnowledgeSourceType = "faq" | "policy" | "conversations" | "catalog";
@@ -13,6 +15,10 @@ interface Props {
   type: KnowledgeSourceType;
   onReindex?: () => void;
   isReindexing?: boolean;
+  /** Necessário para cadastrar a fonte (a API amarra a fonte ao agente). */
+  agentId?: string;
+  /** Chamado depois de criar, para a lista recarregar. */
+  onCriada?: () => void;
 }
 
 const TYPE_META: Record<
@@ -56,7 +62,10 @@ function formatRelative(iso: string | null): string {
   return new Date(iso).toLocaleDateString("pt-BR");
 }
 
-export function KnowledgeSourceCard({ source, type, onReindex, isReindexing }: Props) {
+export function KnowledgeSourceCard({
+  source, type, onReindex, isReindexing, agentId, onCriada,
+}: Props) {
+  const [novaAberta, setNovaAberta] = useState(false);
   const meta = TYPE_META[type];
   const Icon = meta.Icon;
 
@@ -71,25 +80,26 @@ export function KnowledgeSourceCard({ source, type, onReindex, isReindexing }: P
           </div>
           <p className="text-sm text-text-muted">{meta.description}</p>
         </CardHeader>
-        {/* O botão "Configurar" era um stub: `disabled` fixo com um
-            onClick de toast "Em breve." que, por estar desabilitado, NUNCA
-            aparecia. O usuário via um botão morto e nenhuma explicação — e
-            saía achando que a base de conhecimento existia e estava vazia por
-            culpa dele. Enquanto a criação por aqui não existe, a tela diz o
-            que é verdade. */}
-        <CardContent className="flex-1 space-y-2">
+        <CardContent className="flex-1">
           <p className="text-sm text-text-muted">Nenhuma fonte configurada.</p>
-          <p className="text-xs text-text-muted">
-            Cadastrar {meta.label.toLowerCase()} por esta tela ainda não está
-            disponível. Enquanto isso, dá para criar pela API
-            (<code>POST /api/v1/ai/knowledge/sources</code>) — e o agente segue
-            atendendo normalmente, só sem consultar esta base.
-          </p>
         </CardContent>
         <CardFooter>
-          <span className="rounded-sm border border-border px-2 py-1 text-xs text-text-muted">
-            Em breve
-          </span>
+          {/* Onde havia um botão `disabled` fixo com um toast "Em breve." que,
+              por estar desabilitado, nunca aparecia. A API sempre existiu;
+              faltava a tela. */}
+          <Button variant="secondary" size="sm" onClick={() => setNovaAberta(true)}>
+            Configurar {meta.label}
+          </Button>
+          {agentId ? (
+            <NovaFonteDialog
+              agentId={agentId}
+              tipo={type}
+              rotulo={meta.label}
+              aberto={novaAberta}
+              onFechar={() => setNovaAberta(false)}
+              onCriada={() => onCriada?.()}
+            />
+          ) : null}
         </CardFooter>
       </Card>
     );

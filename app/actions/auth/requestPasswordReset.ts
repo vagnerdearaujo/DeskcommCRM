@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { forgotPasswordSchema, type ForgotPasswordInput } from "@/lib/auth/schemas";
 import { audit, hashEmail } from "@/lib/audit";
+import { authRateLimited, AUTH_LIMITS } from "@/lib/auth/rate-limit";
 import { env } from "@/lib/env";
 
 export type RequestPasswordResetResult =
@@ -37,6 +38,12 @@ export async function requestPasswordReset(
   const requestId = hdrs.get("x-request-id");
   const ip = hdrs.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
   const userAgent = hdrs.get("user-agent") ?? null;
+
+  // Sem teto, este endpoint é uma metralhadora de e-mail contra terceiros e um
+  // oráculo de enumeração de conta. Issue #64.
+  if (await authRateLimited("reset", parsed.data.email, AUTH_LIMITS.reset)) {
+    return { ok: false, error: "rate_limited" };
+  }
 
   const supabase = await createClient();
   const { error } = await supabase.auth.resetPasswordForEmail(parsed.data.email, {

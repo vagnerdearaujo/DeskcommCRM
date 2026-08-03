@@ -81,6 +81,8 @@ export function KnowledgeSourcesClient({ agentId, initialSources }: Props) {
             source={source ?? null}
             isReindexing={isReindexing}
             onReindex={source ? () => reindex.mutate(source.id) : undefined}
+            agentId={agentId}
+            onCriada={onChange}
           />
         );
       })}

@@ -20,6 +20,14 @@ export interface LlmEdgeConfig {
   /** chave de plataforma (fallback quando a org não tem BYOK). Opcional no boot. */
   anthropicApiKey?: string;
   /**
+   * Mesma ideia para OpenAI. Existia só a da Anthropic, e isso quebrava a
+   * transcrição de áudio: o Whisper é da OpenAI, mas a org que usa Anthropic
+   * como provedor de chat não tem credencial OpenAI cadastrada — e o
+   * instalador coleta OPENAI_API_KEY justamente para isso. Sem este fallback
+   * a chave do instalador não chegava a lugar nenhum.
+   */
+  openaiApiKey?: string;
+  /**
    * TTL do prefixo estável de cache (knob LLM_CACHE_TTL). Opcional para quem
    * monta a config na mão (testes) — o seam aplica a doutrina '1h' quando ausente.
    */
@@ -151,6 +159,8 @@ export async function resolveOrgLlmConfig(
     });
   } else if (provider === 'anthropic' && cfg.anthropicApiKey) {
     apiKey = cfg.anthropicApiKey;
+  } else if (provider === 'openai' && cfg.openaiApiKey) {
+    apiKey = cfg.openaiApiKey;
   } else {
     throw new LlmNotConfiguredError();
   }

@@ -1,5 +1,9 @@
 # Dependencies
 node_modules/
+# Sem a barra tambem: `node_modules/` casa so com diretorio, e um SYMLINK
+# chamado node_modules (worktree apontando para a instalacao principal) passa
+# batido e vai parar no commit. Aconteceu no PR #83.
+node_modules
 .pnp
 .pnp.js
 
@@ -95,3 +99,6 @@ package-lock.json
 .e2e-invite-url.json
 .superpowers/evidence/
 evidence/.sonda-score-residuo.json
+
+# sessão reusada pelas jornadas (contém tokens)
+.auth/

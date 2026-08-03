@@ -27,7 +27,13 @@ function getRedis(): Redis | null {
     }
     return null;
   }
-  _redis = new Redis({ url, token });
+  // `retry: false`: com Redis inalcançável (URL errada, rede caída), o default
+  // do SDK re-tenta com backoff e cada chamada passa a custar SEGUNDOS. Como
+  // já existe fallback em memória logo abaixo, retentar aqui só transfere a
+  // indisponibilidade do Redis para a latência do login. Falhe rápido e caia
+  // para a memória. Medido: com URL morta, duas chamadas somavam ~8s numa
+  // requisição de recuperação de senha, estourando o timeout da tela.
+  _redis = new Redis({ url, token, retry: false });
   return _redis;
 }
 
@@ -93,4 +99,30 @@ export async function checkRateLimit(
     limit,
     window_sec: windowSec,
   };
+}
+
+/**
+ * Lê o contador SEM incrementar (issue #64).
+ *
+ * Existe porque bloqueio por tentativa-que-falhou precisa de duas operações
+ * distintas: *consultar* antes de chamar o provedor (senão o ataque nunca é
+ * barrado antes de acontecer) e *incrementar* só quando a tentativa falha
+ * (senão login bem-sucedido consome o orçamento e tranca quem acertou a senha).
+ */
+export async function peekRateLimit(bucket: string, windowSec: number): Promise<number> {
+  const windowStart = Math.floor(Date.now() / (windowSec * 1000));
+  const key = `${bucket}:${windowStart}`;
+
+  const redis = getRedis();
+  if (!redis) {
+    const existing = _memBuckets.get(key);
+    return !existing || existing.expiresAt <= Date.now() ? 0 : existing.count;
+  }
+  try {
+    const value = await redis.get<number | string>(key);
+    return value == null ? 0 : Number(value);
+  } catch {
+    const existing = _memBuckets.get(key);
+    return !existing || existing.expiresAt <= Date.now() ? 0 : existing.count;
+  }
 }

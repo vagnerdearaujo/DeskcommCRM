@@ -14,6 +14,7 @@ import { createDefaultRegistry } from "@/lib/agent-engine/edge/llm/providers";
 import { createPool } from "@/lib/agent-engine/db/pool";
 import type { EventRow, HandlerResult } from "@/lib/event-log/dispatcher";
 import { deriveMediaText, type DeriveDeps } from "@/lib/messaging/media/derive";
+import { TIPOS_DERIVAVEIS } from "@/lib/messaging/media/derivable";
 import { deriveVideoText } from "@/lib/messaging/media/video-derive";
 import { apiTranscriptionProvider } from "@/lib/messaging/media/transcription";
 import { logger } from "@/lib/logger";
@@ -22,7 +23,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export const MEDIA_DERIVE_CONSUMER_KEY = "media_derive_v1";
 const DRAIN_MAX_ATTEMPTS = 5; // espelho de lib/event-log/drain.ts
 
-const DERIVABLE = new Set(["audio", "image", "document", "video"]);
+// Lista compartilhada com o drain do turno — ver lib/messaging/media/derivable.ts.
 
 // ponytail: singleton lazy — o drain só nos dá o admin client; resolveOrgLlmConfig
 // exige pg.Pool direto. Sem pool global no processo Next.js, então criamos um sob
@@ -61,7 +62,7 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
   const msg = data as MessageRow | null;
   if (!msg?.media_storage_path) return { consumer_key, status: "skipped", detail: "no media" };
   if (msg.media_derived_status === "ready") return { consumer_key, status: "skipped", detail: "already derived" };
-  if (!DERIVABLE.has(msg.type)) return { consumer_key, status: "skipped", detail: `type ${msg.type}` };
+  if (!TIPOS_DERIVAVEIS.has(msg.type)) return { consumer_key, status: "skipped", detail: `type ${msg.type}` };
   // Vídeo é opt-in (custo: ffmpeg + N chamadas de visão): só deriva se algum agente
   // publicado da org tem video_frames_enabled=true (flag da migration 0058).
   if (msg.type === "video") {
@@ -86,11 +87,36 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
     if (dl.error || !dl.data) throw new Error(`storage_download_failed: ${dl.error?.message ?? "no_data"}`);
     const buffer = Buffer.from(await dl.data.arrayBuffer());
 
-    // Credencial BYOK da org p/ visão (imagem). Transcrição usa a mesma chave se
-    // o provider for openai; senão exige credencial openai dedicada (Whisper).
-    const llmCfg: LlmEdgeConfig = { anthropicApiKey: process.env.ANTHROPIC_API_KEY, cacheTtl: "1h" };
+    // Credencial BYOK da org p/ visão (imagem).
+    const llmCfg: LlmEdgeConfig = {
+      anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+      openaiApiKey: process.env.OPENAI_API_KEY,
+      cacheTtl: "1h",
+    };
     const llm = await resolveOrgLlmConfig(derivePool(), llmCfg, row.organization_id);
-    const deps = buildDeriveDeps(llm);
+
+    // A transcrição é SEMPRE do Whisper (api.openai.com), então precisa de uma
+    // chave OpenAI — não da chave do provedor de chat da org. O comentário
+    // antigo já dizia isso ("senão exige credencial openai dedicada"), mas o
+    // código passava `llm.apiKey` direto: numa org com Anthropic, a chave da
+    // Anthropic era enviada para a OpenAI e voltava 401 em toda tentativa
+    // (visto nesta VPS: media.derive_requested preso com transcription_401,
+    // e o cliente ouvindo "não consigo ouvir áudio" com a chave certa no .env).
+    let openaiKey: string | null = null;
+    if (llm.provider === "openai") {
+      openaiKey = llm.apiKey;
+    } else {
+      try {
+        const oa = await resolveOrgLlmConfig(derivePool(), llmCfg, row.organization_id, {
+          provider: "openai",
+        });
+        openaiKey = oa.apiKey;
+      } catch {
+        openaiKey = null; // sem credencial e sem OPENAI_API_KEY: áudio fica sem transcrição
+      }
+    }
+
+    const deps = buildDeriveDeps(llm, openaiKey);
 
     const text = await deriveMediaText(msg.type, buffer, msg.media_mime ?? "application/octet-stream", deps);
     await admin.from("messages")
@@ -107,7 +133,10 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
   }
 }
 
-function buildDeriveDeps(llm: { provider: string; apiKey: string; defaultModel: string | null }): DeriveDeps {
+function buildDeriveDeps(
+  llm: { provider: string; apiKey: string; defaultModel: string | null },
+  openaiKey: string | null,
+): DeriveDeps {
   const registry = createDefaultRegistry();
   const visionCapable = modelCapabilities(llm.provider, llm.defaultModel ?? "").image;
   const describeImage: DeriveDeps["describeImage"] = async (buffer, mime) => {
@@ -129,7 +158,12 @@ function buildDeriveDeps(llm: { provider: string; apiKey: string; defaultModel: 
     });
     return res.text;
   };
-  const transcriber = apiTranscriptionProvider({ apiKey: llm.apiKey });
+  // Sem chave OpenAI não há como transcrever: devolver string vazia é honesto
+  // (o derivado fica vazio e o marcador "[áudio]" continua valendo) e evita o
+  // loop de 401 que retentava a cada drain.
+  const transcriber: DeriveDeps["transcriber"] = openaiKey
+    ? apiTranscriptionProvider({ apiKey: openaiKey })
+    : { transcribe: async () => "" };
   return {
     transcriber,
     describeImage,

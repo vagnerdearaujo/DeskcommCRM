@@ -33,7 +33,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v3
         with:
           version: latest
 
@@ -89,17 +89,40 @@ jobs:
       - name: Instalar o browser
         run: pnpm exec playwright install --with-deps chromium
 
-      # Subconjunto deliberado: specs que não precisam de fixture semeada nem de
-      # serviço externo. O que ficou DE FORA (e por quê) está no passo seguinte —
+      # O seed lê `.env.local` do cwd (não de process.env), então o arquivo é
+      # escrito aqui. Ele cria 1 org + 4 usuários com os 4 papéis e um TOTP
+      # verified de secret conhecido no admin — sem isso, todo spec que loga
+      # fica de fora, que era a maior parte da suíte.
+      - name: Semear credenciais de teste
+        run: |
+          cat > .env.local <<EOF
+          NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
+          NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
+          SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY
+          INTERNAL_SECRET=ci-placeholder-nao-e-segredo
+          EOF
+          pnpm exec tsx scripts/seed-e2e-credentials.ts
+
+      # O que ficou DE FORA (e por quê) é declarado no passo de summary —
       # cobertura parcial silenciosa se lê como cobertura total.
+      #
       # `next start` roda com NODE_ENV=production, e aí toda var marcada
-      # `required()` no lib/env.ts passa a ser obrigatória — inclusive as de
-      # serviço que este subconjunto nem toca. Os valores abaixo são
-      # PLACEHOLDERS FALSOS, existem só para o boot passar da validação Zod.
-      # Nenhum segredo real entra aqui: este job roda em PR de fork, onde
-      # secrets não são expostos por design.
+      # `required()` no lib/env.ts vira obrigatória, inclusive as de serviço que
+      # estes specs nem tocam. Os valores abaixo são PLACEHOLDERS FALSOS, só
+      # para o boot passar da validação Zod — nenhum segredo real entra aqui.
       - name: E2E (subconjunto sem dependência externa)
-        run: pnpm exec playwright test smoke.spec.ts auth.spec.ts error-pages.spec.ts
+        run: |
+          # --workers=1 não é preciosismo: os specs compartilham UMA conta admin
+          # com MFA, e código TOTP é de uso único por janela no GoTrue. Com dois
+          # workers, dois specs gerando o mesmo código no mesmo intervalo de 30s
+          # fazem o segundo ser recusado como replay. Foi o que derrubava a
+          # `reset-password-mfa` (issue #80): ela passa sozinha e falha em
+          # paralelo. Paralelizar de novo exige conta própria por spec.
+          pnpm exec playwright test --workers=1 \
+            smoke.spec.ts auth.spec.ts error-pages.spec.ts \
+            password-recovery.spec.ts signup-journey.spec.ts \
+            rbac-roles.spec.ts inbox-scope.spec.ts reset-password-mfa.spec.ts \
+            degradacao-silenciosa.spec.ts vps-webhook-outbound-ssrf.spec.ts
         env:
           INTERNAL_SECRET: ci-placeholder-nao-e-segredo
           CPF_ENCRYPTION_KEY: ci-placeholder-nao-e-segredo
@@ -118,20 +141,21 @@ jobs:
           {
             echo "## E2E — cobertura deste job"
             echo ""
-            echo "Rodou: smoke, auth, error-pages."
+            echo "**Rodou (10 de 20 specs):** smoke, auth, error-pages, password-recovery,"
+            echo "signup-journey, rbac-roles, inbox-scope, reset-password-mfa,"
+            echo "degradacao-silenciosa, vps-webhook-outbound-ssrf."
             echo ""
-            echo "**Não rodou** (16 specs), por dependerem de fixture semeada ou serviço externo:"
-            echo "- WAHA: followup-journey, webhooks"
-            echo "- WAHA + Redis + Resend + Nuvemshop: vps-fresh-onboarding"
-            echo "- fixture semeada (scripts/seed-e2e-*.ts): followup-builder, followup-queue,"
-            echo "  inbox-scope, invite-lifecycle, kanban-owner-filter, queue-assign, rbac-roles,"
-            echo "  risk-radar, signup-journey, password-recovery, reset-password-mfa,"
-            echo "  degradacao-silenciosa, vps-webhook-outbound-ssrf"
+            echo "**Não rodou (10):**"
+            echo "- precisa de WAHA: followup-journey, webhooks"
+            echo "- precisa de WAHA + Redis + Resend + Nuvemshop: vps-fresh-onboarding"
+            echo "- precisa de seed próprio: followup-builder, followup-queue,"
+            echo "  kanban-owner-filter, queue-assign, risk-radar, invite-lifecycle,"
+            echo "  system-update"
             echo ""
-            echo "Expandir o subconjunto é trabalho de seguimento — ver issue #63."
+            echo "Expandir é trabalho de seguimento — issue #63."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-report
