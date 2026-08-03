@@ -140,7 +140,7 @@ const DEBT = new Set(KNOWN_DEBT.flatMap((g) => g.files));
 
 function walk(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
-    const p = join(dir, e.name);
+    const p = join(dir, e.name).replaceAll("\\", "/");
     if (e.isDirectory()) return e.name === "node_modules" ? [] : walk(p);
     return /\.tsx?$/.test(e.name) ? [p] : [];
   });
