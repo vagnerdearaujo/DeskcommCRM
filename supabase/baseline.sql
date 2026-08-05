@@ -8715,3 +8715,61 @@ CREATE OR REPLACE FUNCTION "public"."retrieve_top_k_chunks"("p_organization_id" 
   order by c.embedding <=> p_embedding asc
   limit greatest(p_k, 0);
 $$;
+
+-- ---- idioma do contato (migration 0098) ----
+-- O ai-response-worker seleciona contacts.locale e o prompt usa {{contact_locale}},
+-- mas a coluna nunca existiu no snapshot: em toda instalação self-host o PostgREST
+-- respondia "column contacts_1.locale does not exist" e o worker pulava TODA
+-- conversa, com o erro escondido num log de nível info.
+-- NULL = herda o padrão da organização (o código resolve com fallback pt-BR).
+-- Sem CHECK: locale é vocabulário aberto; constraint aqui quebraria o update.sh
+-- de clones com valores legados.
+alter table public.contacts
+  add column if not exists locale text;
+
+comment on column public.contacts.locale is
+  'Idioma preferido do contato (ex.: pt-BR, es-PY). NULL = herda o padrão da organização; o código resolve com fallback pt-BR.';
+-- ---- foto de perfil do contato (migration 0099) ----
+-- O WAHA devolve a foto como URL assinada do CDN do WhatsApp, com validade de
+-- ~9 dias (medido). Guardar a URL crua faria todo avatar quebrar em uma semana,
+-- em silêncio. Por isso o arquivo vai para o bucket whatsapp-media e aqui fica
+-- só o CAMINHO — mesmo padrão de messages.media_storage_path. É também o que
+-- torna a LGPD cumprível: foto é dado pessoal e some na anonimização, o que só
+-- se garante sobre arquivo próprio.
+alter table public.contacts
+  add column if not exists avatar_storage_path text,
+  add column if not exists avatar_updated_at   timestamptz;
+
+comment on column public.contacts.avatar_storage_path is
+  'Caminho da foto de perfil no bucket whatsapp-media. NULL = sem foto. Guardamos o arquivo, não a URL do WhatsApp, que expira em ~9 dias.';
+comment on column public.contacts.avatar_updated_at is
+  'Quando a foto foi buscada pela última vez. NULL = nunca tentado. Usado pelo cron de refresh para escolher quem revisitar.';
+
+-- Índice PARCIAL, e não composto liderado por organization_id: a varredura do
+-- cron não filtra organização nenhuma (varre a plataforma inteira), então com a
+-- coluna líder irrestrita o planner não percorre em ordem de avatar_updated_at e
+-- cai em seq scan + top-N sort. Medido em pg17 com 20.000 contatos, 17.665
+-- elegíveis, melhor de 3:  composto 10,272 ms · parcial 0,090 ms (114x), e o
+-- parcial ocupa 160 kB porque só indexa quem o cron pode escolher.
+-- O predicado de data fica fora do WHERE: now() não é imutável e o Postgres
+-- recusa. Não faz falta — os NULL vêm primeiro e o Index Scan para nas 25.
+-- O drop é auto-curativo e só dispara em quem tenha a versão composta: em banco
+-- novo, e na re-aplicação do update.sh, o bloco é no-op (nada é reconstruído).
+do $$
+begin
+  if exists (
+    select 1 from pg_indexes
+    where schemaname = 'public'
+      and indexname  = 'idx_contacts_avatar_refresh'
+      and indexdef ilike '%organization_id%'
+  ) then
+    execute 'drop index public.idx_contacts_avatar_refresh';
+  end if;
+end
+$$;
+
+create index if not exists idx_contacts_avatar_refresh
+  on public.contacts (avatar_updated_at nulls first)
+  where wa_identity is not null and is_anonymized = false;
+
+notify pgrst, 'reload schema';

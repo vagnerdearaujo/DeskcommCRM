@@ -66,7 +66,7 @@ mudança toca schema, RLS ou UI, `gov:verify` verde **não** é prova — rode `
 efêmero pg17). `.github/workflows/perf.yml`: `build-and-size` = `pnpm build`.
 **Os três são checks obrigatórios** na branch protection da `main`.
 
-`.github/workflows/e2e.yml` roda **3 das 19 specs** Playwright (`smoke`, `auth`,
+`.github/workflows/e2e.yml` roda **10 das 20 specs** Playwright (`smoke`, `auth`,
 `error-pages`) contra um Supabase local de verdade com o `baseline.sql` aplicado — o mesmo
 banco que o self-hoster tem. **Não é obrigatório ainda** (falta dado de estabilidade) e as
 outras 16 continuam sem gate: se você mexeu em UI ou fluxo de usuário fora desse
@@ -125,7 +125,7 @@ subconjunto, a prova é sua.
 
 ## Limitações conhecidas (estado em 2026-07-29, contra `origin/main` @ 789dfa6)
 
-- **16 das 19 specs E2E seguem fora do CI.** Se você mexeu em UI ou fluxo de usuário fora
+- **10 das 20 specs E2E seguem fora do CI.** Se você mexeu em UI ou fluxo de usuário fora
   de `smoke`/`auth`/`error-pages`, a prova é sua — nenhum gate automático cobre.
 - Rate limit HTTP existe em **2** pontos do código (webhook de captação e dispatcher de IA);
   login, signup, aceite de convite, crons e MCP estão sem. Não há lockout por conta no login.

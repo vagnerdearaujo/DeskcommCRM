@@ -188,7 +188,7 @@ Checks **obrigatórios** na branch protection da `main` (verificado na configura
 
 Check **não-obrigatório** (roda, mas não segura merge):
 
-- **`e2e`** (`e2e.yml`) — sobe Supabase local, aplica o `baseline.sql` e roda **3 das 19 specs** Playwright (`smoke`, `auth`, `error-pages`). As outras 16 dependem de fixture semeada ou serviço externo e seguem sem gate (issue #63). Vira obrigatório quando acumular execuções estáveis.
+- **`e2e`** (`e2e.yml`) — sobe Supabase local, aplica o `baseline.sql` e roda **10 das 20 specs** Playwright (`smoke`, `auth`, `error-pages`, `password-recovery`, `signup-journey`, `rbac-roles`, `inbox-scope`, `reset-password-mfa`, `degradacao-silenciosa`, `vps-webhook-outbound-ssrf`). As outras 10 dependem de serviço externo (WAHA, Redis, Resend, Nuvemshop) e seguem sem gate (issue #63) — inclusive a `vps-fresh-onboarding`, que é P0.
 
 Ao mexer em schema, RLS, RBAC, atribuição, escopo, roteamento, follow-up, webhooks ou automações: rode `pnpm test:db` **localmente** antes de abrir PR. É o único caminho que exercita o `baseline.sql` que o self-hoster realmente aplica.
 
@@ -280,5 +280,6 @@ Antes de declarar uma task pronta:
 11. **Mudança de schema saiu como migration versionada + linha no MANIFEST** (ver Doutrina de Migrations) — clones conseguem atualizar
 12. **Se tocou UI/fluxo de usuário: provado pela tela como um leigo faria**, em ambiente fresco estilo VPS, com evidência visual (ver Doutrina de QA Visual com Recursos Reais) — curl não conta
 13. **Living System Checklist respondido** (ver `docs/doctrine/sistema-vivo.md`) — a feature não é ilha: tem entrada + saída, emite atividade/log, aparece na tela, tem mecanismo anti-morte, e o mapa vivo (`docs/architecture/`) reflete peça nova com ≥2 arestas
+14. **Tela nova tem porta** — declarada em `lib/navigation/registry.ts` com seu grupo, ou na allowlist de `tests/unit/navegacao-completude.test.ts` **com justificativa escrita**. Ter tela e ser alcançável são coisas diferentes: o CI reprova tela que existe mas em que só se chega digitando a URL
 
 Um staff engineer aprovaria? Se não, itera.
