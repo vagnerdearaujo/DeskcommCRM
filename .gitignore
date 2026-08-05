@@ -79,6 +79,15 @@ deskcommcrm-setup-kit.zip
 data/
 data/backups/
 
+# Dumps de banco (dados reais) — NÃO versionar; só docs/scripts de backups viajam
+backups/*
+!backups/README.md
+!backups/restore-snapshot.cmd
+!backups/rollback-alinhar-historico-2026-08-03.sql
+
+# Chave raiz do pgsodium (Supabase) — segredo local, nunca versionar
+supabase/pgsodium/
+
 # gov-loop — estado operacional fica FORA do git (a resposta do humano na inbox
 # e a linha 'started' do sessions.log não podem sujar o working tree; a guarda de
 # chão limpo do LOOP.md os stasharia). loop/checkpoints/evidence/ NÃO é ignorado:

@@ -282,3 +282,47 @@ problemas em dev:
 - [ ] Backup do volume `waha-data` (contém `.sessions` com dados de pareamento)
 - [ ] `extra_hosts` e `host.docker.internal` não existem em Linux — webhooks vão
       direto pelo IP da bridge Docker ou domínio público
+
+---
+
+## 9. Política de sessão — o dev NUNCA conecta o número real (2026-08-05)
+
+### Por quê
+
+O WhatsApp mantém **uma única conexão ativa por número** e uma fila de entrega
+no servidor: quando o número fica offline, as mensagens ficam retidas e são
+entregues assim que ele reconecta. Conectar o número real em **qualquer** outra
+instância (ex.: o WAHA dev) tem dois efeitos:
+
+1. A sessão anterior (prod) é derrubada no WhatsApp;
+2. A fila de mensagens retidas é **drenada para a conexão nova** (o dev).
+
+Resultado: o banco de produção nunca recebe as mensagens que chegaram durante o
+período de teste — para o prod, é perda. O modelo "prod dormente durante testes"
+só funciona se o número real ficar **offline** no período; aí a fila entrega tudo
+ao prod quando ele voltar.
+
+### Regras
+
+- **Nunca** escanear o QR do número real no WAHA dev (dashboard 3030).
+- As sessões do dev vivem em `./data/waha/sessions-dev` (bind separado desde
+  2026-08-05). O WAHA dev não enxerga `./data/waha/sessions` (reservada ao prod
+  local/VPS) e não auto-conecta sessão nenhuma.
+- Testar o pipeline de mensagens com **webhook simulado** (abaixo) ou com um
+  número de teste dedicado, se um dia existir.
+
+### Simular um webhook de mensagem (sem WhatsApp real)
+
+App dev no ar (porta do app em `.env.local` → `NEXT_PUBLIC_APP_URL`; padrão 3000) e
+uma sessão de teste registrada em `channel_sessions`:
+
+```bash
+pnpm simulate:waha
+# personalizar:
+pnpm simulate:waha --session <waha_session_name> --text "Oi! Vi o anúncio" --from 5531999990001
+```
+
+`scripts/simulate-waha-message.ts` posta um inbound de texto no endpoint
+per-tenant e prova que a mensagem foi gravada em `messages`. Só cobre a
+**ingestão**; para provocar um turno real do agente (exige credencial LLM e
+worker rodando), usar `scripts/provoke-agent-turn.ts`.
