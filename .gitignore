@@ -48,6 +48,7 @@ next-env.d.ts
 # Supabase local
 supabase/.temp/
 supabase/.branches/
+supabase/pgsodium/
 
 # Epic executor (skill artifacts)
 .epic-executor/
@@ -79,6 +80,7 @@ deskcommcrm-setup-kit.zip
 # Dados persistentes locais (bind mounts) — NÃO versionar
 data/
 data/backups/
+backups/
 
 # gov-loop — estado operacional fica FORA do git (a resposta do humano na inbox
 # e a linha 'started' do sessions.log não podem sujar o working tree; a guarda de
