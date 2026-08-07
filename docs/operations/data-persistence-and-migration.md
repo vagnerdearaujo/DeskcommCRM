@@ -202,8 +202,8 @@ scripts\rollback.bat full 2026-07-30
 | `scripts/backup.bat` | **Novo** — wrapper para Task Scheduler |
 | `scripts/rollback.sh` | **Novo** — rollback DB + app (shell, Linux/VPS) |
 | `scripts/rollback.bat` | **Novo** — wrapper rollback para Windows |
-| `supabase/migrations/20260428195500_0096_recreate_organizations.sql` | **Novo** — recria organizations (migration 0001 era stub) |
-| `supabase/migrations/down/20260428195500_0096_recreate_organizations.down.sql` | **Novo** — reversão da migration 0096 (em `down/` para o CLI não aplicá-la) |
+| `supabase/migrations/20260428195500_0110_recreate_organizations.sql` | **Novo** — recria organizations (migration 0001 era stub). Renumerada de 0096 para 0110 na integração upstream (2026-08-06): o NNNN 0096 já era usado pelo upstream; o timestamp não mudou, então nenhum banco re-aplica. |
+| `supabase/migrations/down/20260428195500_0110_recreate_organizations.down.sql` | **Novo** — reversão da migration 0110 (em `down/` para o CLI não aplicá-la) |
 | `docs/operations/migration-policy.md` | **Novo** — política de migrações, rollback e fork safety |
 
 ### WAHA sessions agora em disco

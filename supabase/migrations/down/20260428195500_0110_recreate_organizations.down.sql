@@ -8,7 +8,7 @@
 -- rollback oficial do banco é via snapshot (scripts/rollback.sh --db).
 --
 -- Uso:
---   docker exec -i supabase_db_deskcomm-crm psql -U postgres -d postgres < supabase/migrations/down/20260428195500_0096_recreate_organizations.down.sql
+--   docker exec -i supabase_db_deskcomm-crm psql -U postgres -d postgres < supabase/migrations/down/20260428195500_0110_recreate_organizations.down.sql
 -- =============================================================================
 
 -- 1. Remover registros inseridos pela migration 0096
