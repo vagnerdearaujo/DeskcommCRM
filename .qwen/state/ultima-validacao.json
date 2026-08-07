@@ -1,0 +1,112 @@
+{
+  "data": "2026-08-07",
+  "agente": "qa-ops",
+  "head": "d631fdfc fix(migrations): renumera 0110/0111/0112 para 0116/0117/0118 na integração upstream #181",
+  "escopo": "Fase 1-2 da bateria (typecheck + lint). Unit já rodada anteriormente (2947/2950, 3 ambientais/flaky). E2E não rodada nesta missão (fora do escopo pedido).",
+  "fases_rodadas": [
+    { "fase": "typecheck", "comando": "pnpm typecheck", "resultado": "PASSOU", "exit": 0, "detalhe": "tsc --noEmit sem nenhum erro emitido" },
+    { "fase": "lint", "comando": "pnpm lint", "resultado": "PASSOU com warnings", "exit": 0, "detalhe": "eslint . — 186 problems (0 errors, 186 warnings); 3 warnings potencialmente fixáveis com --fix" }
+  ],
+  "resultados": {
+    "typecheck": "OK — exit 0, zero erros",
+    "lint": "OK — exit 0, 0 errors / 186 warnings (nenhum erro bloqueante)",
+    "warnings_por_regra": {
+      "no-console": 122,
+      "react-hooks/set-state-in-effect": 19,
+      "@typescript-eslint/consistent-type-imports": 17,
+      "@typescript-eslint/no-unused-vars": 15,
+      "react-hooks/exhaustive-deps": 5,
+      "@next/next/no-img-element": 4,
+      "react-hooks/incompatible-library": 2,
+      "unused-eslint-disable": 2,
+      "TOTAL": 186
+    },
+    "falhas_ambientais_conhecidas_no_lint": "NENHUMA — confirmado como esperado: spawnSync npx ENOENT, grep do shell e timeout de barrel de ícones são da suíte unit, não aparecem no lint"
+  },
+  "falhas_classificadas": [
+    {
+      "regra": "no-console (122)",
+      "classificacao": "dívida de qualidade (não ambiental, não flaky, não bug real)",
+      "evidencias": [
+        "(a) eslint isolado em scripts/check-user.ts reproduz os mesmos 4 warnings; determinístico.",
+        "(b) git log: arquivos de scripts/ vêm de merges do upstream (d0c6ad81, 3312dc5e) e commits de feature; nenhum é divergência do fork.",
+        "(c) leitura de código + eslint.config.mjs: regra configurada como warn com allow [warn,error,info]; console.log dispara em scripts CLI/sondas/evidência (uso intencional em ferramentas tsx, fora do bundle)."
+      ],
+      "acao_recomendada": "Não corrigir agora. Mutirão opcional: mover scripts/sondas para override no-console off, ou trocar console.log por console.info nos casos legítimos."
+    },
+    {
+      "regra": "react-hooks/set-state-in-effect (19)",
+      "classificacao": "dívida de qualidade pré-existente documentada (não ambiental, não flaky, não bug real)",
+      "evidencias": [
+        "(a) eslint isolado em components/ai/AgentEditor.tsx reproduz o mesmo warning (linha 107).",
+        "(b) git log: componentes vêm de merges do upstream (d0c6ad81 merge upstream #181).",
+        "(c) eslint.config.mjs comentário explícito: 'padrão setState-em-effect é pré-existente em 14 componentes — warn até o mutirão de refactor'. Padrão é idiomático (sincronizar form ao abrir dialog)."
+      ],
+      "acao_recomendada": "Já é warn deliberado na config até mutirão de refactor. Acompanhar; não corrigir em massa agora."
+    },
+    {
+      "regra": "@typescript-eslint/consistent-type-imports (17)",
+      "classificacao": "dívida de qualidade (não ambiental, não flaky, não bug real)",
+      "evidencias": [
+        "(a) eslint isolado em tests/unit/agent-stage-sync.test.ts reproduz o warning (linha 12: import() type annotation).",
+        "(b) git log: tests/unit e lib vêm de merges do upstream.",
+        "(c) leitura de código: padrão `import('./x').then` com anotação de tipo inline; regra prefere type-imports; não afeta runtime."
+      ],
+      "acao_recomendada": "Limpeza de baixo risco (a maioria é auto-fixável com --fix, exceto import() dinâmico). Opcional."
+    },
+    {
+      "regra": "@typescript-eslint/no-unused-vars (15)",
+      "classificacao": "dívida de qualidade / código morto (não ambiental, não flaky, não bug real)",
+      "evidencias": [
+        "(a) eslint isolado em app/actions/settings/updateTenant.ts reproduz o warning ('createClient' nunca usado).",
+        "(b) git log: arquivo veio de merge do upstream.",
+        "(c) leitura de código: updateTenant.ts importa createClient mas usa apenas createAdminClient (comentário no código explica a escolha do admin client para escrita em organizations); OwnerBadge importa Badge sem usar; scripts/qa-wave-13-07.ts importa fs/path sem usar."
+      ],
+      "acao_recomendada": "Remover imports mortos (auto-fixável). Em updateTenant.ts, remover o import createClient com cuidado (não é usado em nenhum caminho). Opcional."
+    },
+    {
+      "regra": "react-hooks/exhaustive-deps (5)",
+      "classificacao": "dívida de qualidade (não ambiental, não flaky, não bug real)",
+      "evidencias": [
+        "(a) eslint isolado em app/app/ai/agents/_components/AgentsList.tsx reproduz (expressão lógica 'agents' nas deps do useMemo).",
+        "(b) git log: upstream (d0c6ad81).",
+        "(c) leitura de código: deps instáveis (queryKey arrays literais, expressões lógicas) — risco teórico de memoização ineficaz, sem bug de runtime reportado."
+      ],
+      "acao_recomendada": "Mutirão de React perf: wrap de queryKey/agents em useMemo próprio. Não bloqueante."
+    },
+    {
+      "regra": "@next/next/no-img-element (4)",
+      "classificacao": "dívida de qualidade (não ambiental, não flaky, não bug real)",
+      "evidencias": [
+        "(a) eslint isolado em components/inbox/media/StickerMedia.tsx reproduz (linha 16).",
+        "(b) git log: componentes de mídia vêm do upstream.",
+        "(c) leitura de código: <img> com src dinâmico (mediaSrc(messageId)) para mídia do WhatsApp — trocar por next/image exige loader/cache customizado; uso atual é intencional para mídia assinada."
+      ],
+      "acao_recomendada": "Manter por ora (mídia com URL dinâmica assinada); revisar quando houver loader de mídia."
+    },
+    {
+      "regra": "react-hooks/incompatible-library (2)",
+      "classificacao": "dívida de qualidade (não ambiental, não flaky, não bug real)",
+      "evidencias": [
+        "(a) eslint isolado em app/admin/(protected)/tenants/new/_form.tsx reproduz (linha 163: form.watch('plan')).",
+        "(b) git log: commit 39440b4a 'feat(EPIC-11): admin tenants list + create [wave 4]' + 57609934 (feat do fork/upstream).",
+        "(c) leitura de código: useForm().watch() do React Hook Form não memoizável com segurança pelo React Compiler; warning do próprio plugin, sem impacto de runtime."
+      ],
+      "acao_recomendada": "Conhecido/esperado do RHF; seguir recomendação do plugin quando refatorar (extrair watch em componente/hook próprio). Não bloqueante."
+    },
+    {
+      "regra": "unused-eslint-disable (2)",
+      "classificacao": "dívida de qualidade (não ambiental, não flaky, não bug real)",
+      "evidencias": [
+        "(a) eslint isolado em lib/logger.ts reproduz (linhas 28 e 32).",
+        "(b) git log: lib/logger.ts do upstream.",
+        "(c) leitura de código + eslint.config.mjs: diretivas em console.warn/console.error são redundantes porque a regra no-console tem allow [warn,error,info]; a diretiva de console.log (linha 24) é usada e não acusa."
+      ],
+      "acao_recomendada": "Remover as 2 diretivas redundantes (auto-fixável com --fix). Trivial."
+    }
+  ],
+  "observacoes_nao_bloqueantes": [
+    "pnpm 10+ ignora o campo 'pnpm.overrides' no package.json (warning do próprio pnpm no início do lint/typecheck): 'The pnpm field in package.json is no longer read... keys ignored: pnpm.overrides'. Migrar overrides para pnpm-workspace.yaml quando conveniente — não afeta a validação."
+  ],
+  "proximo_passo": "Bateria verde para deploy de teste (typecheck OK, lint OK). Próxima fase da bateria: E2E (playwright com channel msedge) quando solicitado. Redução dos 186 warnings é mutirão separado, não bloqueia. Nada a corrigir — nenhum bug real encontrado nesta missão."
+}
