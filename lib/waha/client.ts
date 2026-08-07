@@ -128,29 +128,6 @@ export class WahaClient {
   }
 
   /**
-   * Delete a session from WAHA entirely (stop + remove).
-   * Idempotent: 404 is treated as success so callers can clean up
-   * without worrying about stale state.
-   */
-  async deleteSession(name: string): Promise<void> {
-    // 1) Stop first so Baileys releases the connection cleanly
-    await this.stopSession(name);
-
-    // 2) Delete
-    const res = await fetch(
-      `${this.baseUrl}/api/sessions/${encodeURIComponent(name)}`,
-      {
-        method: "DELETE",
-        headers: { "X-Api-Key": this.apiKey },
-      },
-    );
-    if (!res.ok && res.status !== 404) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`waha_delete_${res.status}: ${body.slice(0, 200)}`);
-    }
-  }
-
-  /**
    * URL da foto de perfil do contato, ou null.
    *
    * NÃO lança quando falha: contato sem foto, com privacidade fechada ou
