@@ -232,10 +232,18 @@ test.describe("webhooks & automações — fluxo completo", () => {
       await page.goto(`${APP_URL}/app/pipelines/${pipelineId}`);
       const leadHeading = page.getByRole("heading", { name: LEAD_NAME });
       await expect(leadHeading).toBeVisible({ timeout: 15_000 });
+      // A TAG VIVE NO `title` DO CARD, não como texto visível.
+      //
+      // `KanbanCard.tsx` publica `title={`Tags: ...`}` com um comentário que
+      // declara a intenção: "Tags saem do card (Lei A): ficam a um hover, sem
+      // ocupar altura". Esta spec afirmava texto visível — ela é que envelheceu
+      // junto com o desenho, e ninguém soube porque ela nunca rodou em gate
+      // (issue #63). Afirmar o `title` mantém a garantia que importa: a tag que
+      // a automação aplicou CHEGOU ao card.
       const leadCard = leadHeading.locator(
-        "xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' border-border ')][1]",
+        "xpath=ancestor::div[@role='group'][1]",
       );
-      await expect(leadCard.getByText(TAG)).toBeVisible();
+      await expect(leadCard).toHaveAttribute("title", new RegExp(`Tags:.*${TAG}`));
 
       // --- Step 9: AGENT não vê "Webhooks" e é redirecionado ---
       const agentContext = await browser.newContext();

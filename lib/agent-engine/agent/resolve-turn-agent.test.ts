@@ -42,6 +42,7 @@ function router(overrides: Partial<LoadedRouter> = {}): LoadedRouter {
     id: 'router-1',
     name: 'R',
     classifierModel: 'claude-haiku-4-5',
+    classifierProvider: null,
     sticky: true,
     minConfidence: 0.6,
     fallbackAgentId: null,
