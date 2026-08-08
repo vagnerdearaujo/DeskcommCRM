@@ -16,11 +16,27 @@
 # deve ser http://app:3000 no .env — como no template hostgator), então o
 # webhook nunca precisa de URL pública. O nginx do host bloqueia o path
 # /api/v1/webhooks/waha (retorna 403) para o que vier de fora.
+#
+# Supabase self-host (CLI no mesmo host): o worker do agent-engine fala direto
+# com o Postgres do Supabase. Ele entra na rede criada pela CLI
+# (supabase_network_deskcomm-crm) ALÉM da rede interna do compose — assim o
+# SUPABASE_DB_URL usa o nome do container (supabase_db_deskcomm-crm:5432) sem
+# depender de host.docker.internal nem de abrir porta no ufw do host.
 
 services:
   app:
     ports:
       - "127.0.0.1:13080:3000"
 
+  worker:
+    networks:
+      - internal
+      - supabase_net
+
   caddy:
     profiles: ["caddy-nao-usado-com-proxy-externo"]
+
+networks:
+  supabase_net:
+    external: true
+    name: supabase_network_deskcomm-crm
