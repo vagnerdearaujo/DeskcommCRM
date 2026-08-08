@@ -1,0 +1,3 @@
+# Scripts bash precisam de LF no checkout mesmo no Windows (core.autocrlf=true
+# converte para CRLF, e o bash rejeita CRLF: "set: pipefail\r: invalid option").
+*.sh text eol=lf

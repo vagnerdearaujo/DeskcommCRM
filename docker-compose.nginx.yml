@@ -1,0 +1,26 @@
+# DeskcommCRM — override para VPS que JÁ TEM um nginx no host ocupando 80/443
+# (ex.: Mailcow + n8n + Portainer + site institucional no mesmo servidor).
+#
+#   docker compose -f docker-compose.prod.yml -f docker-compose.nginx.yml up -d
+#
+# O stack padrão sobe um Caddy que publica 80/443 — impossível aqui: o nginx do
+# host é quem serve HTTPS para todos os vhosts (certificado Let's Encrypt único,
+# renovação via webroot) e desligá-lo derrubaria o site e o e-mail. Este override:
+#
+#   1. coloca o serviço `caddy` num profile que nunca é ativado (as portas 80/443
+#      continuam só do nginx do host);
+#   2. publica o `app` APENAS no loopback (127.0.0.1:13080) — nenhuma interface
+#      externa expõe a porta; o vhost do domínio no nginx do host faz o proxy_pass.
+#
+# O WAHA fala com o app pela rede interna do Docker (WAHA_WEBHOOK_BASE_URL
+# deve ser http://app:3000 no .env — como no template hostgator), então o
+# webhook nunca precisa de URL pública. O nginx do host bloqueia o path
+# /api/v1/webhooks/waha (retorna 403) para o que vier de fora.
+
+services:
+  app:
+    ports:
+      - "127.0.0.1:13080:3000"
+
+  caddy:
+    profiles: ["caddy-nao-usado-com-proxy-externo"]
