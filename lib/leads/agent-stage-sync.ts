@@ -76,10 +76,12 @@ export type { RiskBucket };
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { logger } from "@/lib/logger";
 import { emitLeadActivity } from "@/lib/leads/activity-emitter";
 import { registraFalhaDeAtividade } from "@/lib/leads/activity-write-failure";
 import { resolveActiveLeadForContact } from "@/lib/leads/active-lead";
 import { stageChangeReason } from "@/lib/leads/activity-emitter";
+import { podeOperarNoFunil } from "./escopo-de-funil";
 
 export interface ResultadoDaSincronizacao {
   moveu: boolean;
@@ -99,6 +101,15 @@ export interface ResultadoDaSincronizacao {
     | "sem_negocio"
     | "ambiguo"
     | "conflito_humano"
+    /**
+     * O negócio está num funil que este agente não cuida (spec 17 passo 3).
+     *
+     * ⚠️ NÃO é o mesmo que `sem_mapeamento`: lá falta configuração de ETAPA (o
+     * agente cuidaria, mas não sabe para onde ir); aqui a configuração está
+     * COMPLETA e a resposta é não. E não é `falha_de_escrita`: nada falhou — a
+     * regra funcionou.
+     */
+    | "fora_do_escopo"
     | "falha_de_escrita"
     | "indisponivel";
   leadId?: string;
@@ -122,7 +133,20 @@ export interface ResultadoDaSincronizacao {
  */
 export async function sincronizaEstagioDoAgente(
   admin: SupabaseClient,
-  input: { organizationId: string; contactId: string; passo: string },
+  input: {
+    organizationId: string;
+    contactId: string;
+    passo: string;
+    /**
+     * Funis que ESTE agente pode escrever (`ai_agent_versions.pipeline_ids`).
+     *
+     * `undefined` = chamador que ainda não sabe do escopo (caminho legado):
+     * segue como antes. Array VAZIO = nenhum funil, e aí nada é movido — a
+     * distinção existe porque tratar "não informado" como "vazio" pararia todo
+     * caminho que ainda não foi migrado, em silêncio.
+     */
+    escopoDeFunis?: readonly string[];
+  },
 ): Promise<ResultadoDaSincronizacao> {
   // ⚠️ O erro do SELECT É LIDO, e isso não é zelo: o supabase-js NÃO LANÇA em
   // falha de rede — devolve { data: null, error }. Descartar o erro faria o
@@ -160,6 +184,27 @@ export async function sincronizaEstagioDoAgente(
     return { moveu: false, motivo: rota.reason === "no_open_lead" ? "sem_negocio" : "ambiguo" };
   }
   const lead = candidatos.find((c) => c.id === rota.leadId)!;
+
+  // ── ESCOPO DE FUNIL (spec 17 passo 3) ────────────────────────────────────
+  //
+  // DEPOIS de rotear, e não antes: filtrar os candidatos pelo escopo faria um
+  // contato cujo único negócio está fora virar "sem_negocio" — e o dono leria
+  // "esse cliente não tem negócio aberto", que é falso e manda procurar no
+  // lugar errado. O negócio EXISTE; o que não existe é a permissão.
+  if (input.escopoDeFunis !== undefined) {
+    const veredito = podeOperarNoFunil(input.escopoDeFunis, lead.pipeline_id);
+    if (!veredito.permitido) {
+      return {
+        moveu: false,
+        motivo: "fora_do_escopo",
+        leadId: lead.id,
+        detalhe:
+          veredito.motivo === "escopo_vazio"
+            ? "nenhum funil liberado para este assistente"
+            : "o negócio está num funil que este assistente não cuida",
+      };
+    }
+  }
 
   const { data: stageRows, error: erroStages } = await admin
     .from("crm_stages")
@@ -234,6 +279,53 @@ export async function sincronizaEstagioDoAgente(
       tipo: "stage_changed",
       origem: "lib/leads/agent-stage-sync",
       erro: atividade.error,
+    });
+  }
+
+  // ⚠️ O EVENTO, E NÃO SÓ A ATIVIDADE — E A DIFERENÇA ENTRE OS DOIS É QUEM LÊ.
+  //
+  // `crm_lead_activities` conta a história na timeline do card: é para humano.
+  // `event_log` é o que ACIONA quem reage — `lib/automation/engine.handler.ts`
+  // (regras do tenant) e `lib/followup/gatilho-etapa.ts` consomem
+  // `lead.stage_changed`, e as três rotas HTTP de movimento
+  // (`leads/[id]/move`, `moveLeadHandler`, `leads/bulk`) sempre o emitiram.
+  //
+  // Enquanto esta emissão não existia, mover pela mão e mover pelo assistente
+  // eram acontecimentos DIFERENTES para o sistema: o card andava, a timeline
+  // contava, e nenhuma regra rodava — em silêncio, sem erro, sem log. Uma regra
+  // que ignora metade dos movimentos é pior que uma regra que dispara demais,
+  // porque a primeira é invisível. Mover pelo assistente tem de ser
+  // indistinguível de mover pela mão.
+  //
+  // `entity_kind='crm_lead'` não é decoração: o motor de automação FILTRA por
+  // ele (o trigger legado `fn_emit_event_on_lead_change` emite com
+  // `entity_kind='lead'`, e o filtro é o que impede a regra de rodar duas vezes
+  // pela mesma mudança). Emitir com outro valor aqui seria emitir para ninguém.
+  //
+  // Fire-and-forget com o erro LIDO, no mesmo espírito do resto do arquivo: a
+  // mutação já aconteceu e não se desfaz por causa do rastro, mas rastro
+  // perdido vira linha de log, nunca silêncio.
+  const { error: erroEvento } = await admin.rpc("emit_event" as never, {
+    p_event_type: "lead.stage_changed",
+    p_entity_kind: "crm_lead",
+    p_entity_id: lead.id,
+    p_payload: {
+      pipeline_id: lead.pipeline_id,
+      from_stage_id: lead.stage_id,
+      to_stage_id: destino.stageId,
+      status: lead.status,
+    },
+    // Quem moveu vai no metadata, como nas rotas — lá é `actor_user_id`, aqui é
+    // o assistente. Sem isto, um evento sem ator nenhum se parece com um bug de
+    // quem for depurar a regra que ele disparou.
+    p_metadata: { actor_kind: "ai", source: "agent-stage-sync", passo_do_agente: input.passo },
+    p_organization_id: input.organizationId,
+  });
+  if (erroEvento) {
+    logger.error("[agent-stage-sync] emit_event lead.stage_changed falhou", {
+      lead_id: lead.id,
+      organization_id: input.organizationId,
+      error: erroEvento.message,
     });
   }
 

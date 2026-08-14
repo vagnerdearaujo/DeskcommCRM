@@ -1,9 +1,7 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
 import { formatRelative } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { toast } from "sonner";
 import {
   Table,
   TableBody,
@@ -13,43 +11,17 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import type { Contact } from "@/lib/types/contacts";
-import { promoteContactToCrm } from "@/app/actions/contacts/promoteContact";
+import { rotuloDoContato } from "@/lib/contacts/rotulo-do-contato";
 
 interface Props {
   contacts: Contact[];
 }
 
 function displayName(c: Contact): string {
-  return c.display_name?.trim() || c.name?.trim() || "—";
-}
-
-function PromoteButton({ contactId }: { contactId: string }) {
-  const [isPending, startTransition] = useState(false);
-  const [done, setDone] = useState(false);
-
-  if (done) return null;
-
-  return (
-    <form
-      action={async () => {
-        startTransition(true);
-        const r = await promoteContactToCrm(contactId);
-        if (r.ok) {
-          setDone(true);
-          toast.success("Contato promovido para o CRM.");
-        } else {
-          startTransition(false);
-          toast.error(`Erro: ${r.error}`);
-        }
-      }}
-    >
-      <Button type="submit" size="sm" variant="outline" disabled={isPending}>
-        {isPending ? "…" : "Promover"}
-      </Button>
-    </form>
-  );
+  // Era a outra tela sem telefone no fallback — e a única com "—" numa lista
+  // onde a coluna ao lado já mostra o número.
+  return rotuloDoContato(c);
 }
 
 export function ContactsTable({ contacts }: Props) {
@@ -63,7 +35,6 @@ export function ContactsTable({ contacts }: Props) {
           <TableHead>Tags</TableHead>
           <TableHead>Última atividade</TableHead>
           <TableHead>Status</TableHead>
-          <TableHead></TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -98,14 +69,10 @@ export function ContactsTable({ contacts }: Props) {
               <div className="flex flex-wrap gap-1">
                 {c.is_anonymized && <Badge variant="destructive">Anonimizado</Badge>}
                 {c.is_blocked && <Badge variant="warning">Bloqueado</Badge>}
-                {c.source === "whatsapp" && <Badge variant="neutral">WhatsApp</Badge>}
-                {!c.is_anonymized && !c.is_blocked && c.source !== "whatsapp" && (
+                {!c.is_anonymized && !c.is_blocked && (
                   <Badge variant="success">Ativo</Badge>
                 )}
               </div>
-            </TableCell>
-            <TableCell>
-              {c.source === "whatsapp" && <PromoteButton contactId={c.id} />}
             </TableCell>
           </TableRow>
         ))}

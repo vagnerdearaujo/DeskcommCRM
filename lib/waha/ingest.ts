@@ -12,6 +12,8 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 import { audit } from "@/lib/audit";
+import { sincronizarSaudeDaConexao } from "@/lib/channels/health";
+import { aplicarEfeitosPosEntrada } from "@/lib/channels/pos-entrada";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { ackToStatus } from "@/lib/types/messaging";
 import { bareWaMessageId, chatIdFromWaMessageId } from "@/lib/waha/message-id";
@@ -47,6 +49,24 @@ export interface WahaPayload {
     pushName?: string;
     /** NOWEB: o conteúdo real (imageMessage, stickerMessage, …) — fonte do tipo. */
     message?: Record<string, unknown>;
+    /**
+     * A chave do Baileys — e o achado que o passo 2 da spec 17 mediu.
+     *
+     * Quando o chat é `@lid`, o WhatsApp NÃO esconde o telefone: ele o manda em
+     * `remoteJidAlt` (chat 1:1) ou `participantAlt` (grupo). Medido em
+     * `webhook_events_log` da produção: **76 de 76** payloads @lid com `key`
+     * trazem o número. A leitura de que "@lid é opaco por privacidade" valia
+     * para o `from`, não para o payload inteiro.
+     */
+    key?: {
+      remoteJid?: string;
+      remoteJidAlt?: string;
+      participant?: string;
+      participantAlt?: string;
+      addressingMode?: string;
+      fromMe?: boolean;
+      id?: string;
+    };
   } & Record<string, unknown>;
 }
 
@@ -137,7 +157,6 @@ async function avisarChatNaoReconhecido(
   }
 }
 
-const STOP_RX = /\b(STOP|PARAR|SAIR|UNSUBSCRIBE)\b/i;
 
 export function verifyHmacSha512(
   rawBody: string,
@@ -239,6 +258,47 @@ function notifyNameOf(p: WahaPayload): string | null {
 }
 
 /**
+ * O telefone REAL de quem escreveu, quando o chat chega como `@lid`.
+ *
+ * `from` vem opaco (`70192801575156@lid`), mas `_data.key.remoteJidAlt` traz
+ * `558183647258@s.whatsapp.net`. Em grupo, o equivalente é `participantAlt`.
+ *
+ * Devolve E.164 (`+55…`) ou null. **Só aceita o que parece telefone**: o campo é
+ * de fora, e um valor estranho aqui viraria `phone_number` — que é chave de
+ * reencontro de contato e endereço de envio. Na dúvida, nulo: contato sem
+ * telefone é incômodo, contato com telefone ERRADO manda mensagem para
+ * estranho.
+ */
+export function telefoneAlternativoDe(p: WahaPayload): string | null {
+  const bruto = p._data?.key?.remoteJidAlt ?? p._data?.key?.participantAlt ?? null;
+  if (!bruto) return null;
+  // ⚠️ `endsWith`/`indexOf` e NÃO regex — este valor vem de FORA (é campo de
+  // webhook) e a versão com `/@(s\.whatsapp\.net|c\.us)$/` foi apontada pelo
+  // CodeQL como ReDoS de severidade alta: o motor tenta casar a partir de CADA
+  // `@` da string, então um payload com milhares deles faz o tempo explodir e
+  // trava o processo que ingere as mensagens de todo mundo.
+  //
+  // Comparação de sufixo literal é linear e diz exatamente a mesma coisa. Um
+  // teto de tamanho vem antes, porque nem trabalho linear sobre entrada
+  // arbitrária é de graça.
+  //
+  // Só sufixos de NÚMERO: `@lid` significaria que o campo repetiu a identidade
+  // opaca, e `@g.us` é grupo — nenhum dos dois é telefone de pessoa.
+  if (bruto.length > 128) return null;
+  if (!bruto.endsWith("@s.whatsapp.net") && !bruto.endsWith("@c.us")) return null;
+  const semSufixo = bruto.slice(0, bruto.indexOf("@"));
+  let digitos = "";
+  for (const ch of semSufixo) {
+    if (ch >= "0" && ch <= "9") digitos += ch;
+  }
+  // Faixa E.164: 8 a 15 dígitos. Fora disso não é número discável, e o CHECK
+  // `contacts_phone_e164_format` recusaria — falhar aqui é melhor que abortar a
+  // ingestão inteira da mensagem lá na frente.
+  if (digitos.length < 8 || digitos.length > 15) return null;
+  return `+${digitos}`;
+}
+
+/**
  * Upsert atômico de contato pela identidade canônica. Retorna null se a
  * identidade for de grupo ou a RPC falhar.
  */
@@ -248,6 +308,7 @@ async function upsertContact(
   parsed: ChatIdentity,
   chatId: string,
   notifyName: string | null,
+  telefoneAlt: string | null = null,
 ): Promise<string | null> {
   // ALLOWLIST, não denylist — e a diferença aqui não é estilo.
   //
@@ -271,7 +332,11 @@ async function upsertContact(
   const { data, error } = await admin.rpc("fn_upsert_wa_contact" as never, {
     p_org: orgId,
     p_kind: parsed.kind,
-    p_phone: parsed.kind === "phone" ? parsed.phone : null,
+    // O telefone vem de dois lugares e é UM parâmetro: do próprio chatId quando
+    // ele já é um número, ou de `_data.key.remoteJidAlt` quando o chat é `@lid`.
+    // Resolver aqui, e não no SQL, foi o que permitiu manter a assinatura da
+    // função (e portanto os grants e os invariantes de hardening) intacta.
+    p_phone: parsed.kind === "phone" ? parsed.phone : telefoneAlt,
     p_lid: parsed.kind === "lid" ? parsed.lid : null,
     p_chat_id: chatId,
     p_notify: notifyName,
@@ -383,7 +448,14 @@ async function handleInbound(
     return;
   }
 
-  const contactId = await upsertContact(admin, session.organization_id, parsed, chatId, notifyNameOf(p));
+  const contactId = await upsertContact(
+    admin,
+    session.organization_id,
+    parsed,
+    chatId,
+    notifyNameOf(p),
+    telefoneAlternativoDe(p),
+  );
   if (!contactId) return;
   const conversationId = await upsertConversation(admin, session.organization_id, contactId, session.id);
   if (!conversationId) return;
@@ -437,20 +509,6 @@ async function handleInbound(
 
   await markConversation(admin, session.organization_id, conversationId, "inbound", previewFromMessage(p), now);
 
-  if (p.body && STOP_RX.test(p.body)) {
-    await admin
-      .from("contacts")
-      .update({ is_blocked: true, blocked_reason: "stop_keyword", blocked_at: now })
-      .eq("id", contactId);
-    await audit({
-      action: "contact.blocked",
-      organizationId: session.organization_id,
-      resourceType: "contact",
-      requestId,
-      metadata: { reason: "stop_keyword", contact_id: contactId },
-    });
-  }
-
   await audit({
     action: "message.received",
     organizationId: session.organization_id,
@@ -459,46 +517,51 @@ async function handleInbound(
     metadata: { conversation_id: conversationId, type: p.type, external_id: p.id },
   });
 
-  // Dispara o agent-dispatcher worker (fire-and-forget; falha não quebra o 200).
+  // ── OS EFEITOS DE NEGÓCIO, agora ATRÁS DO SEAM ──────────────────────────────
+  //
+  // Opt-out, nascimento do lead e despacho do agente moravam AQUI DENTRO, em
+  // linha. Enquanto este era o único canal isso não incomodava; quando entrou o
+  // número oficial, ele passou a gravar a mensagem e não fazer nenhum dos três —
+  // sem erro e sem log. Medido: 806 despachos deste lado, 0 do outro.
+  //
+  // A ordem dos três é regra de negócio e está documentada em
+  // `lib/channels/pos-entrada.ts`, junto com o motivo de cada posição. O
+  // comportamento aqui é o MESMO de antes, campo a campo — o que mudou é quem o
+  // executa.
+  await aplicarEfeitosPosEntrada(admin, {
+    organizationId: session.organization_id,
+    contactId,
+    conversationId,
+    messageId: insertedMessage?.id ?? null,
+    channelSessionId: session.id,
+    texto: p.body ?? null,
+    nomeDoContato: notifyNameOf(p),
+    requestId,
+    origem: "waha_webhook",
+  });
+
+  // ── POR QUE NÃO SE EMITE `message.received` AQUI ────────────────────────────
+  //
+  // Porque o BANCO já emite. O gatilho `trg_messages_emit_event` roda AFTER
+  // INSERT em `messages`, sem filtrar canal, e chama `fn_emit_message_event`.
+  // Esta função emitia a SEGUNDA cópia — só neste canal.
+  //
+  // Medido em produção antes de sair: 805 mensagens com DOIS eventos deste lado
+  // e 30 com UM do outro. Os quatro consumidores registrados rodavam nas duas
+  // linhas, então cada mensagem daqui era classificada duas vezes pelo modelo de
+  // sentimento (duas chamadas pagas), a automação do usuário disparava duas
+  // vezes, e a chave de idempotência do follow-up não protegia porque inclui o
+  // id da LINHA de evento — que é diferente nas duas.
+  //
+  // O critério de aceite escrito em `docs/stories/epics/EPIC-03-inbox-messaging.md`
+  // já dizia "2 events 'message.received'? NÃO — só 1". O duplicado gêmeo, o de
+  // leads, foi aposentado na migration 0043; este passou despercebido porque a
+  // guarda de `entity_kind` não separa os dois emissores (ambos usam "message").
+  //
+  // Quem precisar do preview do corpo: ele está na própria linha de `messages`,
+  // alcançável pelo `message_id` que o gatilho manda.
   if (insertedMessage?.id) {
     const inboundMessageId = insertedMessage.id;
-    admin
-      .rpc("emit_event" as never, {
-        p_event_type: "ai_agent.dispatch_requested",
-        p_entity_kind: "message",
-        p_entity_id: inboundMessageId,
-        p_payload: {
-          organization_id: session.organization_id,
-          conversation_id: conversationId,
-          contact_id: contactId,
-          channel_session_id: session.id,
-          inbound_message_id: inboundMessageId,
-        },
-        p_metadata: { source: "waha_webhook", request_id: requestId },
-        p_organization_id: session.organization_id,
-      } as never)
-      .then(({ error }) => {
-        if (error) console.error("[waha.ingest] emit dispatch_requested failed", error.message);
-      });
-
-    admin
-      .rpc("emit_event" as never, {
-        p_event_type: "message.received",
-        p_entity_kind: "message",
-        p_entity_id: inboundMessageId,
-        p_payload: {
-          conversation_id: conversationId,
-          contact_id: contactId,
-          channel_session_id: session.id,
-          body_preview: (p.body ?? "").slice(0, 280),
-        },
-        p_metadata: { source: "waha_webhook", request_id: requestId },
-        p_organization_id: session.organization_id,
-      } as never)
-      .then(({ error }) => {
-        if (error) console.error("[waha.ingest] emit message.received failed", error.message);
-      });
-
     if (mediaUrlOf(p)) {
       admin
         .rpc("emit_event" as never, {
@@ -586,8 +649,21 @@ async function handleOutboundFromUserPhone(
 
   // fromMe: o pushName do payload é o do OPERADOR, não do destinatário —
   // repassá-lo batizaria o contato do cliente com o nome da loja (e o
-  // coalesce do fn_upsert_wa_contact congelaria o nome errado).
-  const contactId = await upsertContact(admin, session.organization_id, parsed, chatId, null);
+  // `coalesce` do fn_upsert_wa_contact congelaria o nome errado).
+  //
+  // O TELEFONE, ao contrário, vai: aqui `_data.key.remoteJid` é o chat do
+  // DESTINATÁRIO, então `remoteJidAlt` é o número do cliente, não o da loja.
+  // Medido na produção — inbound 56/56 e outbound 20/20 trazem o campo, e as
+  // amostras de outbound mostram o número do cliente. Nome e telefone vêm de
+  // lugares diferentes do mesmo payload, e só um deles inverte no envio.
+  const contactId = await upsertContact(
+    admin,
+    session.organization_id,
+    parsed,
+    chatId,
+    null,
+    telefoneAlternativoDe(p),
+  );
   if (!contactId) return;
   const conversationId = await upsertConversation(admin, session.organization_id, contactId, session.id);
   if (!conversationId) return;
@@ -695,10 +771,93 @@ async function handleSessionStatus(
 
   const update: Record<string, unknown> = { status, last_status_change_at: now };
   if (status === "WORKING" && session.warmup_started_at && !session.is_warmup_complete) {
-    update.is_warmup_complete = true;
+    // Só `warmup_completed_at`: `is_warmup_complete` é `GENERATED ALWAYS AS
+    // (warmup_completed_at IS NOT NULL)`, e atribuir a ela abortava o UPDATE
+    // INTEIRO — inclusive o `status`, que nada tem a ver com warm-up. Ou seja: a
+    // sessão que terminava o aquecimento parava de atualizar o próprio estado, e
+    // o espelho do canal congelava sem erro visível.
     update.warmup_completed_at = now;
   }
   await admin.from("channel_sessions").update(update).eq("id", session.id);
+
+  // ─── E agora alguém precisa SABER ────────────────────────────────────────
+  //
+  // Até aqui esta função gravava o estado numa coluna e não contava a ninguém.
+  // Foi assim que uma desconexão real passou horas despercebida: o evento
+  // chegou, a coluna atualizou, e o dono só descobriu ao estranhar que ninguém
+  // escrevia. O estado certo no lugar que ninguém olha não vale nada.
+  //
+  // O apelido é buscado aqui, e não recebido: com dois números ligados, um aviso
+  // que não diz QUAL conexão caiu obriga o operador a adivinhar. É uma consulta
+  // a mais num evento raro — status muda algumas vezes por dia, não por minuto.
+  const { data: apelidoRow } = await admin
+    .from("channel_sessions")
+    .select("display_name, phone_number")
+    .eq("id", session.id)
+    .maybeSingle();
+
+  await sincronizarSaudeDaConexao(
+    admin,
+    { id: session.id, organization_id: session.organization_id, status },
+    // Veio do próprio transporte: se ele conseguiu nos contar, está alcançável.
+    { reachable: true, status, detail: null },
+    (apelidoRow?.display_name as string | null) ??
+      (apelidoRow?.phone_number as string | null) ??
+      "sem nome",
+  );
+}
+
+/**
+ * O autor editou a mensagem no aplicativo.
+ *
+ * O corpo é SOBRESCRITO, e não versionado: o que o CRM mostra tem que ser o que
+ * o cliente vê agora. Guardar as versões anteriores é outra feature (histórico
+ * de edição), com tela e retenção próprias — fazê-la pela metade acumularia
+ * dado pessoal num campo que ninguém mostra e que a anonimização não conhece.
+ *
+ * `editedMessageId` é o id da mensagem ORIGINAL; o `id` do payload é o do
+ * evento de edição. Casar pelo `id` não acharia nada — e o silêncio pareceria
+ * "funcionou", que é exatamente o modo de falha que este arquivo já pagou caro
+ * em outros lugares.
+ */
+async function handleMessageEdited(
+  admin: Admin,
+  session: Session,
+  p: WahaPayload & { editedMessageId?: string },
+): Promise<void> {
+  const alvo = bareWaMessageId(p.editedMessageId ?? "");
+  const corpo = typeof p.body === "string" ? p.body : null;
+  if (!alvo || corpo === null) return;
+
+  await admin
+    .from("messages")
+    .update({ body: corpo, edited_at: new Date().toISOString() })
+    .eq("organization_id", session.organization_id)
+    .eq("external_id", alvo);
+}
+
+/**
+ * O autor apagou a mensagem ("apagar para todos").
+ *
+ * A linha NÃO é removida: sumir com ela apagaria o contexto das vizinhas — uma
+ * resposta passaria a responder ao nada — e o histórico de quem atendeu. O
+ * corpo também não é limpo aqui: quem decide o que mostrar é a tela, e apagar o
+ * texto no banco impediria o próprio atendente de entender, depois, o que tinha
+ * sido combinado antes do arrependimento.
+ */
+async function handleMessageRevoked(
+  admin: Admin,
+  session: Session,
+  p: WahaPayload & { revokedMessageId?: string },
+): Promise<void> {
+  const alvo = bareWaMessageId(p.revokedMessageId ?? "");
+  if (!alvo) return;
+
+  await admin
+    .from("messages")
+    .update({ revoked_at: new Date().toISOString() })
+    .eq("organization_id", session.organization_id)
+    .eq("external_id", alvo);
 }
 
 /**
@@ -722,6 +881,10 @@ export async function dispatchWahaEvent(
     }
   } else if (eventType === "message.ack") {
     await handleAck(admin, session, payload);
+  } else if (eventType === "message.edited") {
+    await handleMessageEdited(admin, session, payload);
+  } else if (eventType === "message.revoked") {
+    await handleMessageRevoked(admin, session, payload);
   } else if (eventType === "session.status" || eventType === "state.change") {
     await handleSessionStatus(admin, session, payload);
   }

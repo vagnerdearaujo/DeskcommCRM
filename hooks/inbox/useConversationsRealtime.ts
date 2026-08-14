@@ -27,12 +27,34 @@ export interface ContactSummary {
   force_human?: boolean | null;
 }
 
+/**
+ * O número POR ONDE a conversa entrou.
+ *
+ * Não é o número do cliente — é o da empresa. Com um canal só a distinção não
+ * existe; com dois, saber por qual linha a pessoa escreveu é o que decide o tom
+ * da resposta e qual número ela vai ver respondendo.
+ */
+export interface ChannelSummary {
+  phone_number: string | null;
+  display_name: string | null;
+  /**
+   * Quem impõe a regra deste número. A tela NÃO interpreta este valor — ela o
+   * entrega a `estadoDaJanela` (lib/channels), que decide se há relógio a
+   * mostrar. Ler o campo não é nomear o provider; o `if (provider === ...)` é
+   * que a doutrina proíbe, e ele mora atrás do seam.
+   */
+  provider: string | null;
+}
+
 export type ConversationWithContact = Conversation & {
   contacts?: ContactSummary | null;
+  channel_sessions?: ChannelSummary | null;
 };
 
 export interface ConversationsFilters {
   status?: "open" | "claimed" | "ai_handling" | "closed" | "archived";
+  /** Esconde fechadas/arquivadas — ver `exclude_finished` no schema da rota. */
+  exclude_finished?: boolean;
   assigned_to?: "me" | "unassigned" | string;
   search?: string;
   channel_session_id?: string;
@@ -57,6 +79,7 @@ export function useConversationsRealtime(
     queryFn: async ({ pageParam }) => {
       const qs = new URLSearchParams();
       if (filters.status) qs.set("status", filters.status);
+      if (filters.exclude_finished) qs.set("exclude_finished", "true");
       if (filters.assigned_to) qs.set("assigned_to", filters.assigned_to);
       if (filters.search) qs.set("search", filters.search);
       if (filters.channel_session_id) qs.set("channel_session_id", filters.channel_session_id);
@@ -72,6 +95,10 @@ export function useConversationsRealtime(
     },
     getNextPageParam: (last) =>
       last.meta?.has_more && last.meta.cursor ? last.meta.cursor : undefined,
+    // Mesma razão do hilo de mensagens: o inbox é a tela em que a informação
+    // chega de fora enquanto ninguém olha, e voltar para a aba é quando a
+    // defasagem aparece. Segunda rede — a primeira é o Realtime.
+    refetchOnWindowFocus: true,
   });
 
   const onChange = useCallback(() => {

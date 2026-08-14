@@ -48,23 +48,15 @@ export async function signUp(input: SignupInput): Promise<SignUpResult> {
   }
 
   const supabase = await createClient();
-
-  // Signup via convite: armazena o redirect para a página de aceite
-  // para que /auth/confirm redirecione para lá em vez de /onboarding/welcome.
-  const meta: Record<string, string> = {};
-  if (parsed.data.invite_token) {
-    meta.invite_redirect = `/team/accept-invite/${parsed.data.invite_token}`;
-  }
-  if (parsed.data.org_name) {
-    meta.org_name = parsed.data.org_name;
-  }
-
   const { data, error } = await supabase.auth.signUp({
     email: parsed.data.email,
     password: parsed.data.password,
     options: {
-      emailRedirectTo: `${origin}/auth/confirm`,
-      data: meta,
+      // Ver comentário equivalente em requestPasswordReset.ts: ?type=signup
+      // sobrevive ao redirect do GoTrue e é o que distingue este fluxo do de
+      // recovery quando a verificação chega via `code` (PKCE), não `token_hash`.
+      emailRedirectTo: `${origin}/auth/confirm?type=signup`,
+      data: { org_name: parsed.data.org_name },
     },
   });
 

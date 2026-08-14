@@ -100,6 +100,20 @@ MFA obrigatório pra admin logo após o wizard (`MfaEnrollGate`).
 | J4.19 | Arquivar o ÚLTIMO funil ativo | recusa explicada: sem funil não há quadro (executado 2026-08-03) |
 | J4.20 | Arquivar funil que é destino de formulário/automação | recusa NOMEANDO a fonte ou a regra (coberto por unit; `webhook_sources` cascateia) |
 | J4.21 | Lista de funis como `agent` | vê a lista e abre o quadro, sem nenhum controle de escrita (executado 2026-08-03) |
+| J4.22 | **Mensagem de contato desconhecido chega pelo webhook do WAHA** | card nasce no funil de entrada (`is_default`), na primeira etapa aberta, com o NOME de quem escreveu — nunca `@c.us`/`@lid` (executado 2026-08-06 · `conversa-vira-lead.spec.ts`) |
+| J4.23 | Timeline do card recém-nascido | diz **"Entrou pelo WhatsApp"** — card que aparece sem explicação destrói a confiança no automatismo (executado 2026-08-06) |
+| J4.24 | Segunda mensagem do MESMO contato | **não** abre um segundo card: um lead por demanda, não um por mensagem (executado 2026-08-06) |
+| J4.31 | **Marcar em que funis o assistente pode mexer** | nasce FECHADO (a tela explica: "conversa normalmente, mas não mexe em negócio"); a marcação sobrevive ao salvar E RECARREGAR — o defeito do campo que "se desmarca sozinho" (`escopo-de-funil-do-agente.spec.ts`, 2026-08-07) |
+| J4.32 | Funil marcado que o assistente não sabe percorrer | a lacuna de tradução aparece AO LADO da marcação, e só no funil marcado — fora do escopo ela não custa nada |
+| J4.33 | Funil de ENTRADA fora da marcação | avisa que as conversas novas viram negócio ali e vão se acumular sem que o assistente possa organizá-los |
+| J4.34 | O assistente tenta mover card de funil que não é dele | não move, e abre aviso PRÓPRIO na Central ("quis organizar um negócio de um funil que não é dele") — não o aviso de falha, porque nada falhou |
+| J4.35 | Uma pessoa desfaz uma movimentação do assistente | vira atividade na timeline com a etapa que a IA escolheu; agregado por etapa responde "onde ele mais erra" |
+| J4.28 | **A IA ouve um dado na conversa e o propõe** | a pendência aparece na ficha do contato COM o trecho que a pessoa escreveu; nada é gravado até alguém decidir (`confirmar-dado-do-contato.spec.ts`, executado 2026-08-07) |
+| J4.29 | Confirmar a sugestão | o dado entra na ficha, sobrevive ao reload, e a pendência some — não fica botão para o que já foi decidido |
+| J4.30 | Descartar a sugestão | some da tela **sem gravar**; a recusa é auditada, porque "vi e decidi não gravar" é sinal de onde a IA erra |
+| J4.26 | **Salvar o e-mail de um contato pela tela** | fica salvo, aparece na ficha e sobrevive ao reload. Era **500** até 2026-08-06: o handler escrevia em `email_normalized`, coluna GERADA, e o Postgres abortava o UPDATE inteiro (`contato-salva-email.spec.ts`) |
+| J4.27 | Anonimizar um contato (LGPD) | mesma causa da J4.26 na rota `/api/v1/lgpd/anonymize` — **a anonimização não acontecia**. Corrigido; guardado pelo invariante de colunas geradas, ainda **sem prova de tela** |
+| J4.25 | ⚠️ O funil de entrada de uma org nova é de **e-commerce** | `fn_seed_default_pipeline_for_org` semeia "Pedidos" com *Carrinho abandonado · Pago · Em separação…*. Numa clínica ou imobiliária, o lead nasce em **"Carrinho abandonado"**. Achado em 2026-08-06 ao provar J4.22; conserto é decisão de produto (spec 17 passo 4) |
 
 ## J5 — Time: convites e atuação de atendentes `[P0]` (convite) / `[P1]` (rotina)
 
@@ -180,6 +194,58 @@ Bugs desta jornada estão detalhados em `HANDOFF-ia-360.md` (BUG-01 a BUG-05).
 
 ---
 
+## J9 — Ver o que o follow-up já fez, e intervir sem matá-lo `[P1]`
+
+Contexto do código: o dossiê do enrollment (`/app/ai/followups/enrollments/[id]`,
+wave FV-W1-FILA). `followup_enrollment_events` gravava cada passo do motor desde a
+0054 e **nenhuma tela lia a tabela**; a única intervenção possível era cancelar.
+Spec: `tests/e2e/followup-dossie.spec.ts` — os eventos da timeline são REAIS (o
+setup publica um fluxo, cria o enrollment pela API e chama o cron
+`followup-flow-worker`, o mesmo caminho de produção; nada de `INSERT` à mão).
+
+| # | Caso | Expectativa | Resultado |
+|---|------|-------------|-----------|
+| J9.1 | Clicar no contato na aba Fila | abre o dossiê daquele follow-up (rota própria, sobrevive ao F5) | PASS |
+| J9.2 | Ler a história depois de dois ticks do motor | "Seguiu em frente" e "Começou a esperar"; **nenhum** `node_advanced` nem `wait-1` na tela | PASS |
+| J9.3 | Onde está agora | "Deixa esfriar (Espera — espera 4 horas)" + quando volta a andar | PASS |
+| J9.4 | Pausar | status vira "Pausado por uma pessoa"; próximo passo vira "Parado até alguém retomar" | PASS |
+| J9.5 | Pausado não oferece adiar/pular | botão que só sabe recusar não aparece | PASS |
+| J9.6 | Retomar | volta a andar pelo tempo que FALTAVA (não dispara na hora) | PASS |
+| J9.7 | Adiar para uma data escolhida | o próximo disparo passa a ser a data do diálogo | PASS |
+| J9.8 | Pular o passo | o follow-up anda para o passo seguinte; com mais de um caminho, a tela PERGUNTA por onde | PASS |
+| J9.9 | A intervenção aparece na timeline do NEGÓCIO | as **quatro** linhas no card, com autor humano nomeado ("E2E Manager") e sem colapsar apesar de terem acontecido no mesmo minuto | PASS |
+| J9.10 | Viewer | lê o dossiê inteiro, sem coluna de ações; as 4 rotas devolvem 403 `forbidden_role` | PASS |
+| J9.11 | O tempo que a IA escolheu, com plano REAL | "esperar 12 horas" + "bateu no seu limite" + **"a IA pediu 3 dias"** + o motivo e a faixa configurada | PASS |
+| J9.12 | A história do planejamento em português | "O agente decidiu quanto esperar em cada passo" e "Pediu ao agente para planejar os tempos de espera" — sem `timing_plan_decidido` na tela | FAIL → PASS |
+
+Evidência (uma por passo, na ordem da jornada):
+`evidence/followup-dossie/01-dossie-timeline.png` ·
+`evidence/followup-dossie/02-pausado.png` ·
+`evidence/followup-dossie/03-adiado.png` ·
+`evidence/followup-dossie/04-pulado.png` ·
+`evidence/followup-dossie/05-timeline-do-negocio.png` ·
+`evidence/followup-dossie/06-viewer-so-leitura.png` ·
+`evidence/followup-dossie/07-plano-de-tempo.png`.
+
+**J9.11/J9.12 usam plano REAL, não `INSERT` à mão:** o modelo "responde" pelo
+seam `completeTurnForEnrollment` — a mesma função que o worker chama depois da
+chamada de LLM —, então o clamp, a gravação e o `proposto_ms` são os de
+produção. Um jsonb escrito na mão provaria que a tela desenha o que eu inventei.
+
+**O J9.12 nasceu FAIL e é por isso que ele existe:** abrindo o dossiê, a
+história mostrava `código: timing_plan_decidido` e anunciava o turno de
+planejamento como "escrever a mensagem". Nenhum unitário pegaria — os dois
+eventos são do motor novo, e a tela foi o único instrumento que os viu.
+
+**O que o J9.9 mediu e quase passou batido:** as quatro intervenções acontecem
+no mesmo minuto e pelo mesmo ator, e a timeline do negócio COLAPSA blocos assim
+(`agrupaTimeline`, janela de 60s). Escondidas atrás de um "+", o próximo
+atendente abriria o card e não veria que uma pessoa segurou o fluxo — que é a
+única razão de a linha existir. Os quatro tipos entraram em `NUNCA_COLAPSA`
+pelo critério que já estava escrito lá: decisão humana não colapsa.
+
+---
+
 ## J7 — Exploração completa `[P2]`
 
 Andar por TODAS as rotas navegáveis logado como admin e como agent: settings, contacts,
@@ -194,7 +260,7 @@ Critério: nenhuma tela quebra, nenhum stack trace, nenhum texto de erro cru.
 |----|--------|--------|-----------|
 | M1 | `supabase/config.toml` trava `major_version = 15`, mas `baseline.sql` exige PG17 (`GRANT MAINTAIN`) — contribuidor open-source não sobe ambiente local | reproduzido | Alta (DX) |
 | M2 | Trilha manual do `docs/deploy-selfhost/README.md` não configura o cron do drain → automações mortas em silêncio | explorer webhooks | Alta |
-| M3 | README self-host aponta repo/imagem `deskcommcrm/*`; kit usa `melgarafael/*` | explorer webhooks | Alta |
+| M3 | ~~README self-host aponta repo/imagem `deskcommcrm/*`; kit usa `melgarafael/*`~~ **CORRIGIDO 2026-08-13** — era um `git clone` de uma org que não existe (404) em `docs/deploy-selfhost/README.md:26`. Uma consultoria externa leu essa string e concluiu que o compose apontava para uma org desvinculada; o compose sempre apontou para `melgarafael`. | explorer webhooks | — |
 | M4 | `INVITE_TOKEN_SECRET` ausente → fallback `"dev-fallback"` → convite forjável em VPS mal configurada | explorer CRM/time | Alta (segurança) |
 | M5 | AI Gateway key ausente → bot mudo sem NENHUM feedback na UI | explorer IA | Média |
 | M6 | Knowledge sources: botões de upload/configurar são stubs "Em breve" | explorer IA | Média |
@@ -445,3 +511,42 @@ edição de invariante é congelada por hook; usei a válvula
 `DESKCOMM_GOV_INVARIANTS_EDIT=1` **declarando o uso no commit** (`685d6e7`) em vez
 de contornar em silêncio. CI verde em `2c045c4` (invariants, verify, e2e,
 build-and-size, build-and-push).
+
+---
+
+## A atualização alcança o worker? (2026-08-13)
+
+**Jornada nova, e ela nasceu de um defeito que nenhuma jornada existente cobria.** Todas as
+jornadas do mapa exercitam o produto DEPOIS de instalado; nenhuma perguntava se uma correção
+entregue numa versão nova chega mesmo a cada peça da VPS.
+
+O serviço `worker` — o runtime do agente de IA — não tinha `image:` no `docker-compose.prod.yml`,
+só `build:`. Isso o tornava invisível para `docker compose pull` ("Skipped — No image to be
+pulled") e imune a `up -d` sem `--build`. Ele era construído na VPS no dia da instalação e
+**nenhum `update.sh` jamais o reconstruiu**. Correções do agente não chegavam a instalação
+nenhuma, e nada na tela nem no log dizia isso.
+
+O dossiê desta suíte já tinha registrado o sintoma sem tirar a conclusão: a linha 295 anota,
+do QA de instalação real, *"cache de build do Docker zerado (a VPS realmente compila o
+worker)"*. O fato estava medido; a pergunta é que faltava.
+
+**Casos desta jornada** (`[P0]` = primeira impressão / parque instalado):
+
+| # | Caso | Estado |
+|---|---|---|
+| U1 `[P0]` | Instalação nova nasce pinada numa VERSÃO, não em canal móvel | coberto — `hostgator-setup-kit/test-validators.sh` roda o `install.sh` contra um remoto local com tags e cobra o `.env` |
+| U2 `[P0]` | `update.sh` grava as TRÊS imagens na mesma versão | coberto — `tests/shell/update-guard.test.sh` §4b |
+| U3 `[P0]` | Nenhum serviço de produção fica `build:`-only | coberto — `tests/unit/packaging-artefato-do-cliente.test.ts` |
+| U4 | O crontab do scheduler não perde rota ao mudar de arquivo | coberto — `tests/shell/scheduler-entrypoint.test.sh` + `tests/unit/cron-routes-scheduled.test.ts` |
+| U5 | `/api/v1/health` responde a versão real da imagem | coberto — medido no app real: com `APP_VERSION=9.9.9-teste` responde `9.9.9-teste`; sem ela, `desconhecido` |
+| U6 `[P0]` | **Ensaio de atualização numa VPS real, de uma versão anterior para a nova, e o worker passa a rodar o código novo** | **EXECUTADO 2026-08-13** (U6-b, U6-c e **aplicado em produção**) — estado legado reproduzido do commit `ee520110`, worker migrou para a imagem publicada, nada perdido. **Com ressalva:** a 1ª execução do `update.sh` não conserta enquanto o canal `stable` não existir; a 2ª conserta. Evidência e limites em [`../runbooks/remediar-worker-congelado.md`](../runbooks/remediar-worker-congelado.md) §6 |
+
+U6 deixou de ser buraco em 2026-08-13, e o ensaio pagou o próprio custo: revelou que a
+primeira execução do `update.sh` não conserta o worker enquanto o canal `stable` não
+existir — coisa que nenhum teste do CI podia mostrar, porque não é sobre o que os scripts
+fazem, e sim sobre a ORDEM em que o parque encontra as peças.
+
+O que continua fora: o app contra um Supabase real (o ensaio usou Postgres em contêiner),
+uma sessão de WhatsApp pareada de verdade (foi um marcador no volume), e o `install.sh`
+completo da época (exige projeto Supabase). Segue valendo a régua de `vps-fresh-onboarding`:
+o CI prova que os scripts fazem o que dizem, não que a máquina de alguém mudou de estado.

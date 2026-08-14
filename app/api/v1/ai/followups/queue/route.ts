@@ -28,6 +28,7 @@ import { ok, fail } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
 import { situacaoDoRetorno } from "@/lib/followup/retorno";
 import { createClient } from "@/lib/supabase/server";
+import { rotuloDoContato } from "@/lib/contacts/rotulo-do-contato";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,7 @@ const ENROLLMENT_STATUSES = [
   "active",
   "waiting_reply",
   "paused_handoff",
+  "paused_manual",
   "completed",
   "cancelled",
   "dead",
@@ -68,7 +70,7 @@ interface ContactRow {
 
 function resolveContactName(c: ContactRow | null): string {
   if (!c) return "Contato removido";
-  return c.display_name?.trim() || c.name?.trim() || c.phone_number || "Contato sem nome";
+  return rotuloDoContato(c);
 }
 
 function embedded<T>(v: T | T[] | null): T | null {

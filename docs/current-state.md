@@ -118,6 +118,29 @@ funil** (só de etapas). O primeiro é bug de primeira impressão em mobile.
 
 Estes são achados de código/config verificados nesta auditoria, não relatos.
 
+### 4.0 O agente de IA nunca recebia atualização 🔴 — RESOLVIDO em 2026-08-13
+
+Fica no topo por gravidade e porque é o tipo de defeito que este documento existe para
+tornar visível: durou dois meses, atingia **toda** instalação, e nada na tela, no log ou no
+CI dizia isso.
+
+O serviço `worker` do `docker-compose.prod.yml` — o runtime do agente de IA, e o único
+consumidor de `ai_agent.dispatch_requested` — não tinha `image:`, só `build:`. Serviço
+`build:`-only é pulado por `docker compose pull` ("Skipped — No image to be pulled") e imune
+a `up -d` sem `--build`. Consequência: ele era compilado na VPS do cliente no dia da
+instalação e **nenhum `update.sh` jamais o reconstruiu**. Correções do agente não chegavam a
+lugar nenhum. Enquanto isso, `CLAUDE.md` afirmava que "o caminho normal não constrói nada na
+VPS" — verdade para o app, falso para o produto.
+
+Resolvido publicando `deskcomm-worker` e `deskcomm-scheduler` como imagens, com gate em
+`tests/unit/packaging-artefato-do-cliente.test.ts`. Lei em
+[`doctrine/packaging.md`](doctrine/packaging.md); decisões em
+[`adr/0001-packaging-e-distribuicao.md`](adr/0001-packaging-e-distribuicao.md).
+
+**O que continua aberto:** o gate `imagens-ok` ainda não está na branch protection (não pode
+entrar antes do merge, senão trava os PRs abertos), e não existe ensaio automatizado de
+atualização numa VPS real — o caso U6 de [`testing/user-journey-map.md`](testing/user-journey-map.md).
+
 ### 4.1 Os E2E quase não rodam no CI 🟠 — parcialmente resolvido em 2026-07-30
 
 > **Atualização (2026-08-05, issue #63):** `e2e.yml` roda **28 das 32 specs** contra Supabase
@@ -230,6 +253,15 @@ consequência natural de trabalho em branches paralelas, mas ilustra a regra:
 5. **`lib/agent-engine/agent/inbound-turn.ts` com 1789 linhas** — 2,4× o segundo maior arquivo
    de lógica (`AgentForm.tsx`, 746), e é o hot path do produto. Cresceu ~200 linhas desde a
    primeira medição desta auditoria.
+6. **NENHUM cron roda no deploy Vercel.** Os 14 crons do produto são agendados exclusivamente
+   pelo `crond` do serviço `scheduler` do `docker-compose.prod.yml` — e **não existe
+   `vercel.json` neste repo** (medido: `ls vercel.json` → ausente). Como a Vercel é a produção
+   real de quem mantém (ver `project_dois_ambientes_de_producao`), tudo que depende de
+   agendamento está **dormente lá**: `event-log-drain`, `agent-dispatcher`, `followup-flow-worker`,
+   `recover-stuck-messages`, `sync-model-catalog`, `contact-proposals-watcher`, etc. O sintoma
+   nunca é um erro — a tela só fica velha, a fila só não anda. Está escrito aqui porque cada
+   frente nova repetia a suposição de que "o cron roda"; a decisão (portar para Vercel Cron ou
+   assumir que a Vercel é vitrine e a VPS é a operação) é do dono do repo.
 
 ---
 

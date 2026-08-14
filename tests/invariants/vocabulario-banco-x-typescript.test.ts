@@ -145,6 +145,48 @@ const PARES: Array<{
     arquivo: "lib/system/update-run.ts",
     simbolo: "RunStep",
   },
+  {
+    tabela: "channel_sessions",
+    coluna: "provider",
+    // lib/channels/types.ts → ChannelProvider
+    //
+    // ⚠️ O `comment on column public.channel_sessions.provider` do
+    // `supabase/baseline.sql` já AFIRMA, desde a 0087, que este par é "cobrado
+    // por tests/invariants/vocabulario-banco-x-typescript.test.ts". Era falso: o
+    // par nunca estava nesta lista. Comentário não é gate, e um comentário que
+    // promete cobertura inexistente é pior que silêncio — ele desliga a busca.
+    //
+    // Medido na triagem do PR que acrescenta o TERCEIRO canal: o `zernio` entrou
+    // no CHECK do banco e em `ChannelProvider` no mesmo commit, e nenhum job do
+    // CI compararia as duas listas se ele tivesse entrado em só uma. O sintoma
+    // seria `23514` no INSERT da sessão — ou, pior, uma sessão que grava e um
+    // `capabilitiesOf` que lança `unknown_channel_provider` no envio.
+    //
+    // `channel_sessions_provider_ref_check` menciona a coluna e tem literais,
+    // mas NÃO é uma definidora para `literaisSeDefine` (é disjunção de ANDs, não
+    // `col = ANY (ARRAY[...])`) — então este par não colide com ela. Medido, não
+    // suposto: com as duas constraints no banco, `valoresDoCheck` devolve uma só.
+    arquivo: "lib/channels/types.ts",
+    simbolo: "ChannelProvider",
+  },
+  {
+    tabela: "followup_enrollments",
+    coluna: "status",
+    // hooks/followup/useFollowupQueue.ts → FollowupEnrollmentStatus.
+    //
+    // O par aponta para o tipo da TELA, e não para `EnrollmentStatus` de
+    // `lib/followup/node-handlers.ts`, porque são conjuntos diferentes de
+    // propósito: o do motor enumera o que o motor manipula, e o motor nunca lê
+    // nem escreve `paused_manual` (o claim filtra `active|waiting_reply`). Quem
+    // precisa conhecer TODOS os estados é quem os mostra — a fila.
+    //
+    // Nasce junto com a 0145, que acrescentou o sétimo valor. Sem o par, um
+    // status novo no CHECK vira linha na fila com rótulo cru: `rotuloDoStatus`
+    // cai no fallback e a tela mostra o identificador do banco no rosto de quem
+    // opera.
+    arquivo: "hooks/followup/useFollowupQueue.ts",
+    simbolo: "FollowupEnrollmentStatus",
+  },
 ];
 
 /** Tira um nível de parênteses externos, se ele envolver a expressão inteira. */

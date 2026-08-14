@@ -40,8 +40,14 @@
  * A fronteira é "não colado em alfanumérico" — deixa `_`, `/`, `.` e `-` serem
  * separadores de verdade (que `\b` não deixava) e continua ignorando `wahax` /
  * `xwaha`, onde `waha` é pedaço de outra palavra e não menção ao provider.
+ *
+ * O terceiro nome entrou JUNTO com o canal que ele nomeia. Um provider novo que
+ * a catraca não conhece é o mesmo furo da issue #118 numa grafia nova: o gate
+ * fica verde afirmando que a doutrina é respeitada enquanto o nome se espalha
+ * por rota, componente e cópia de tela. Provider novo = uma linha aqui, no
+ * mesmo commit.
  */
-const SEPARADO = /(?<![a-zA-Z0-9])(waha|meta_cloud|graph\.facebook\.com)(?![a-zA-Z0-9])/i;
+const SEPARADO = /(?<![a-zA-Z0-9])(waha|meta_cloud|zernio|graph\.facebook\.com)(?![a-zA-Z0-9])/i;
 
 /**
  * Grafia PascalCase dentro de identificador: `WahaClient`,
@@ -51,7 +57,7 @@ const SEPARADO = /(?<![a-zA-Z0-9])(waha|meta_cloud|graph\.facebook\.com)(?![a-zA
  * segmento. Não seguido de minúscula/dígito exclui `Wahalla` — onde `Waha` é
  * começo de outra palavra, não segmento próprio.
  */
-const PASCAL = /Waha(?![a-z0-9])/;
+const PASCAL = /(Waha|Zernio)(?![a-z0-9])/;
 
 /** Um trecho de código/prosa nomeia um provider de canal? */
 export function nomeiaProvider(texto: string): boolean {

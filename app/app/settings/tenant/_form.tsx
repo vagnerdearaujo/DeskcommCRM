@@ -125,7 +125,7 @@ export function TenantForm({ initial }: Props) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="pt-BR">Português (BR)</SelectItem>
-                <SelectItem value="en-US">English (US)</SelectItem>
+                <SelectItem value="es">Español</SelectItem>
               </SelectContent>
             </Select>
           </div>

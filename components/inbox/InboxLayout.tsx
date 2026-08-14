@@ -1,7 +1,9 @@
 "use client";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/auth/AuthProvider";
+import { estadoDaJanela, formatarDecorrido } from "@/lib/channels/janela";
+import { JanelaFechadaAviso } from "@/components/inbox/JanelaFechadaAviso";
 import { useClaimConversation } from "@/hooks/inbox/useClaimConversation";
 import { useCloseConversation } from "@/hooks/inbox/useCloseConversation";
 import {
@@ -20,12 +22,20 @@ import { CRMSidePanel } from "./CRMSidePanel";
 import { InboxKeyboardShortcuts } from "./InboxKeyboardShortcuts";
 import { ShortcutsHelpDialog } from "./ShortcutsHelpDialog";
 
-function tabToFilter(tab: InboxFiltersValue["tab"]): Partial<ConversationsFilters> {
+/**
+ * O QUE CADA ABA SIGNIFICA. Exportada porque é a definição em si — o defeito
+ * que este mapa já teve (Minhas mostrando tudo que o atendente fechou) não
+ * aparece em nenhuma tela até alguém reclamar, então vale prender por teste.
+ */
+export function tabToFilter(tab: InboxFiltersValue["tab"]): Partial<ConversationsFilters> {
   switch (tab) {
     case "unassigned":
       return { assigned_to: "unassigned", status: "open" };
     case "mine":
-      return { assigned_to: "me" };
+      // Sem `exclude_finished` a aba mostra tudo que o atendente JÁ atendeu —
+      // `Fechar` muda o status mas não solta o dono (de propósito: quem atendeu
+      // é histórico). O lugar de "minhas fechadas" é a aba Fechadas.
+      return { assigned_to: "me", exclude_finished: true };
     case "closed":
       return { status: "closed" };
     case "ai":
@@ -136,6 +146,36 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
     close.mutate({ conversation_id: selectedConversation.id });
   }, [close, selectedConversation]);
 
+  // A janela vence SOZINHA com a aba aberta. Sem este relógio, quem deixa o
+  // inbox aberto a tarde inteira seguiria com o composer liberado numa conversa
+  // que já venceu — e o bloqueio só apareceria no próximo recarregamento.
+  const [agoraJanela, setAgoraJanela] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setAgoraJanela(new Date()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  // A janela de 24h fecha o composer, e o motivo DIZ há quanto tempo fechou.
+  //
+  // Antes disto o texto livre saía, o CRM marcava `failed` e o operador via um
+  // `131047` — descobrindo a regra pelo erro, uma mensagem por vez. Barrar aqui
+  // é o pedido explícito do dono: se não dá para enviar, que não deixe tentar.
+  //
+  // Reusa o `blockedReason` que já existe (contato bloqueado/anonimizado) em vez
+  // de um segundo mecanismo de bloqueio: dois caminhos para desabilitar o mesmo
+  // composer divergem, e o segundo esquece de cobrir o áudio ou o anexo.
+  const janela = estadoDaJanela(
+    selectedConversation?.channel_sessions?.provider ?? null,
+    selectedConversation?.last_inbound_at ?? null,
+    agoraJanela,
+  );
+  const motivoDaJanela =
+    janela.tipo === "fechada"
+      ? janela.fechadaHaMs === null
+        ? "O cliente ainda não escreveu — a janela de 24h nunca abriu. Só um modelo aprovado sai daqui."
+        : `A janela de 24h fechou há ${formatarDecorrido(janela.fechadaHaMs)}. Só um modelo aprovado sai daqui — texto livre é recusado pela plataforma.`
+      : null;
+
   const blockedReason = selectedConversation?.contacts?.is_blocked
     ? "Contato bloqueado — envio de mensagens desabilitado."
     : selectedConversation?.contacts?.is_anonymized
@@ -160,8 +200,27 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
   //
   // `dvh` em vez de `vh` porque no celular a `vh` ignora a barra do navegador — o
   // mesmo corte, só que pior e mudando conforme se rola a página.
+
+  // TRÊS COLUNAS QUE CABEM — medido, não estimado.
+  //
+  // O `xl` do Tailwind dispara em 1280px, e era ali que a terceira coluna
+  // nascia: no ponto exato em que não havia espaço para ela. Com a barra de
+  // navegação (240px) sobram 1040px, e o grid pedia 300 + 707 + 320 = 1327 —
+  // o painel de CRM ficava 311px FORA da viewport, alcançável só rolando o
+  // `main` de lado, que ninguém faz. Em 1280 o atendente simplesmente não via
+  // contexto nenhum do cliente.
+  //
+  // Os 707px eram o `min-content` do `ConversationHeader` (a barra de ações
+  // era `shrink-0`), e `1fr` é `minmax(auto, 1fr)`: não encolhe abaixo disso.
+  // Consertado o header, o `1fr` volta a encolher sozinho — `minmax(0,1fr)`
+  // foi medido aqui e não mudou um pixel, então não entrou.
+  //
+  // Duas faixas em vez de uma: compacta onde aperta, generosa onde há espaço.
+  // Em 1280 isso dá 424px de conversa em vez de 372 — 54px de folga sobre o
+  // piso do composer (370px), em vez dos 2px que a versão de uma faixa só
+  // deixava. Margem de 2px não é margem, é sorte.
   return (
-    <div className="grid h-[calc(100dvh-3.5rem-2*var(--space-6))] w-full grid-cols-1 md:grid-cols-[300px_1fr] xl:grid-cols-[300px_1fr_320px]">
+    <div className="grid h-[calc(100dvh-3.5rem-2*var(--space-6))] w-full grid-cols-1 md:grid-cols-[300px_1fr] xl:grid-cols-[272px_1fr_296px] 2xl:grid-cols-[300px_1fr_320px]">
       <div className="flex h-full min-h-0 flex-col border-r border-border">
         <InboxFilters value={filterValue} onChange={setFilterValue} />
         <div className="min-h-0 flex-1 overflow-hidden">
@@ -184,10 +243,18 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
               <ChatThread conversationId={selectedConversation.id} />
             </div>
             <RetentionNotice conversationId={selectedConversation.id} />
+            {motivoDaJanela && (
+              <JanelaFechadaAviso
+                conversationId={selectedConversation.id}
+                provider={selectedConversation.channel_sessions?.provider ?? null}
+                motivo={motivoDaJanela}
+              />
+            )}
             <Composer
               ref={composerRef}
               conversationId={selectedConversation.id}
               blockedReason={blockedReason}
+              janelaFechada={motivoDaJanela}
               disabled={selectedConversation.status === "closed"}
               contactName={selectedConversation.contacts?.name ?? null}
             />
