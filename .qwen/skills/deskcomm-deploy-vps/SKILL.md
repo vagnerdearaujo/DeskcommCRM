@@ -33,6 +33,14 @@ description: Publica o DeskComm na VPS (ARM64) exclusivamente via git — commit
 9. Teste funcional mínimo (login, página principal) conforme o caso.
 10. Só declarar sucesso com os 3 caminhos (HTTP no domínio + container + log/funcional).
 
+### 11. Verificar envio de e-mail transacional (Brevo SMTP)
+11. **Validar que o app pode enviar e-mails** — executar um teste de envio via Python smtplib ou usando o próprio fluxo do app (ex.: criar convite de equipe, logar no GoTrue e disparar convite por e-mail).
+    - **Esperado:** e-mail chega ao destinatário (confirmado pelo usuário ou log de delivery no console/dev).
+    - **Não configurado:** se `BREVO_SMTP_*` não estiverem no `.env` do VPS, o `isEmailConfigured()` retorna `false` e os e-mails não saem — UI mostrará fallback ou "não configurado".
+    - **Referência:** memória `project/deskcommcrm-brevo-smtp-app.md`; teste python `test-brevo-email.py` (disponível no host).
+
+12. Re-verificar no caminho real antes de declarar restaurado (rollback).
+
 ### 4. Rollback (se algo quebrar)
 11. `deploy.sh --rollback <tag-anterior>` (pipeline único — mesmo caminho do deploy, sem passos manuais inventados).
 12. Re-verificar no caminho real antes de declarar restaurado.
