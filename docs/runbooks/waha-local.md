@@ -43,9 +43,10 @@ services:
     ports:
       - "3030:3000"                          # host 3030 → container 3000
     environment:
-      # ⚠️ SHA512 HASH da API key, NÃO o plaintext!
-      # Gere: echo -n "$WAHA_API_KEY" | sha512sum | awk '{print $1}'
-      WAHA_API_KEY: ${WAHA_API_KEY_SHA512}
+      # ⚠️ Build noweb: plaintext DIRETO — o container compara o header
+      # X-Api-Key contra WAHA_API_KEY sem hash. NÃO use o SHA512 aqui.
+      # (O docker-compose.override.yml limpa WAHA_API_KEY_SHA512 por segurança.)
+      WAHA_API_KEY: ${WAHA_API_KEY}
       WHATSAPP_HOOK_URL: ${WAHA_HOOK_BASE_URL}/api/v1/webhooks/waha
       WHATSAPP_HOOK_EVENTS: "message,message.any,message.ack,session.status,state.change"
       WHATSAPP_HOOK_HMAC: ${WAHA_HMAC_SECRET}
@@ -147,26 +148,36 @@ docker compose --env-file .env.local logs -f waha
 **Verificação:** `docker exec deskcomm-waha env | grep WAHA` para confirmar
 que as variáveis estão presentes.
 
-### 4.3 🔴 WAHA_API_KEY: SHA512 hash vs plaintext
+### 4.3 🟢 WAHA_API_KEY: plaintext direto (build noweb), NÃO SHA512
 
-**Sintoma:** WAHA rejeita chamadas da API (`401 Unauthorized`).
+> Atualizado em 2026-08-14. O comportamento anterior (SHA512 hash) era do
+> build **WAHA Plus**; o build deste projeto é `devlikeapro/waha:noweb`.
 
-**Causa:** O WAHA Plus espera a chave em formato **SHA512 hash** na env var
-`WAHA_API_KEY` (dentro do container), mas o cliente envia a chave em plaintext
-no header `X-Api-Key`. O WAHA hasheia o plaintext recebido e compara com o
-hash armazenado.
+**Sintoma que esse item previne:** WAHA rejeita chamadas da API (`401
+Unauthorized`) porque o container recebeu o SHA512 hash em `WAHA_API_KEY`, mas o
+cliente manda o plaintext no header `X-Api-Key` — e o noweb compara os dois
+**diretamente**, sem hashear.
 
-**Fix:** A env var `WAHA_API_KEY` no `docker-compose.yml` deve conter o SHA512
-hash, NÃO o plaintext. Gerar:
+**Como o noweb autentica:** o container compara o header `X-Api-Key` recebido
+**diretamente** contra o valor de `WAHA_API_KEY` (plaintext). Não há hashing.
+Portanto `WAHA_API_KEY` (em `.env` / `.env.local` e no env do container) é o
+plaintext, e o `docker-compose.override.yml` **limpa** `WAHA_API_KEY_SHA512`
+(`WAHA_API_KEY_SHA512: ""`) para não deixar dúvida.
 
+**Fix se der 401:** garanta que o container subiu com o plaintext:
 ```bash
-echo -n "mIgoSUd3sz8y5Qlb0pqCHcPMK2JnTu6R" | sha512sum | awk '{print $1}'
+docker exec deskcomm-waha env | grep WAHA_API_KEY
+# esperado: WAHA_API_KEY=mIgoSUd3sz8y5Qlb0pqCHcPMK2JnTu6R (sem hash, sem SHA512)
 ```
+Se aparecer um hash longo, o override não foi aplicado ou o `.env` traz o hash
+— subir com `--env-file .env.local` e confirmar o override mesclado.
 
-**Nota:** No ambiente de desenvolvimento local, o `.env.local` contém tanto o
-plaintext (`WAHA_API_KEY`) quanto o hash (`WAHA_API_KEY_SHA512`). O
-`docker-compose.yml` referencia `${WAHA_API_KEY_SHA512}` na env var do
-container.
+**Atenção ao trocar de build:** o **WAHA Plus** É que usa SHA512 hash (o
+container tem o hash e hasheia o plaintext do header para comparar). Se um dia
+trocar `image:` para `waha-plus`, aí `WAHA_API_KEY` no container vira o hash —
+não o plaintext. Mantenha o `.env.local` com ambos (`WAHA_API_KEY` plaintext +
+`WAHA_API_KEY_SHA512`) para essa eventualidade, mas saiba que no noweb só o
+plaintext é usado.
 
 ### 4.4 🟡 Sessions órfãs no WAHA
 
@@ -272,11 +283,12 @@ problemas em dev:
 
 - [ ] **Sempre** usar `WHATSAPP_DEFAULT_ENGINE: NOWEB` (a env `WAHA_DEFAULT_ENGINE`
       não funciona)
-- [ ] A env `WAHA_API_KEY` no container deve conter o **SHA512 hash** da chave,
-      não o plaintext (com exceção do WAHA Plus que aceita plaintext direto —
-      verificar qual build está em uso)
+- [ ] A env `WAHA_API_KEY` no container é o **plaintext** neste build
+      (`devlikeapro/waha:noweb`, que compara o `X-Api-Key` direto). Só vira
+      **SHA512 hash** se trocar o image para `waha-plus` — confirmar qual build
+      está em uso na VPS antes de copiar o `.env`.
 - [ ] **Não usar `:latest`** — pinar digest SHA256 (ver runbook `waha-hostgator.md`)
-- [ ] Webhook URL público (ex: `https://app.deskcomm.com.br/api/v1/webhooks/waha`)
+- [ ] **Não sugerir ngrok** — VPS já tem HTTPS; webhooks resolvem via rede interna Docker. Não usar EasyPanel.
 - [ ] Nginx com `proxy_buffering off` (SSE do WAHA)
 - [ ] Dashboard **desabilitado** em produção
 - [ ] Backup do volume `waha-data` (contém `.sessions` com dados de pareamento)

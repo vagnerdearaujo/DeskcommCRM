@@ -3,10 +3,12 @@
  * `null` from `getWahaClient()` when env is not configured so callers can
  * gracefully render a "Docker is not up" banner instead of crashing.
  *
- * WAHA Plus auth: `X-Api-Key` header. The current devlikeapro/waha-plus
- * image expects the SHA512 HEX HASH directly in the header (matches what's
- * stored in container env). Plaintext-then-hash is NOT used in this version.
- * So WAHA_API_KEY in .env.local IS the hex hash.
+ * Auth: `X-Api-Key` header. O build deste projeto é `devlikeapro/waha:noweb`,
+ * que compara o header `X-Api-Key` DIRETAMENTE contra `WAHA_API_KEY` (plaintext)
+ * — NÃO faz hash. Logo `WAHA_API_KEY` (em `.env`/`.env.local` e no env do
+ * container) é o plaintext; o `docker-compose.override.yml` limpa qualquer
+ * `WAHA_API_KEY_SHA512`. O build WAHA Plus É que usa SHA512 hash — se um dia
+ * trocar o image, a chave no container passa a ser o hash, não o plaintext.
  */
 import { classificarFalhaDeAlcance, explicarFalhaDeAlcance } from "@/lib/net/alcance";
 

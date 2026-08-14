@@ -15,6 +15,14 @@ description: Opera e recupera a stack local do DeskComm no Windows — supabase 
 - Login: `signInWithPassword` → Kong 54321. **`AuthRetryableFetchError: fetch failed` = Kong morto.**
 - Quirk Docker Desktop Windows: bind de arquivos individuais só funciona do C:; o mount `/run/desktop/mnt/host` MORRE quando o hub USB pisca (restart do Docker Desktop não remonta). Junctions NTFS: `.temp`→C: e `data\redis`→C:.
 
+## Quirk WAHA — auth é plaintext direto (build noweb), NÃO SHA512
+
+- O image é `devlikeapro/waha:noweb`. Ele compara o header `X-Api-Key` **diretamente** contra `WAHA_API_KEY` (plaintext) — sem hash.
+- `docker-compose.yml` e `docker-compose.override.yml` passam `WAHA_API_KEY: ${WAHA_API_KEY}` (plaintext); o override **limpa** `WAHA_API_KEY_SHA512` (`""`). O `.env.local` mantém o plaintext em `WAHA_API_KEY`.
+- **Sintoma de erro:** WAHA responde `401 Unauthorized` em qualquer chamada da API. Causa comum: o container subiu com o SHA512 em `WAHA_API_KEY` (veio de `.env` antigo ou do override não mesclado). Verificar: `docker exec deskcomm-waha env | grep WAHA_API_KEY` — tem que mostrar o plaintext curto, não um hash.
+- **Atenção ao trocar de build:** o **WAHA Plus** usa SHA512 hash (container tem o hash, hasheia o plaintext do header). Se um dia trocar `image:` para `waha-plus`, aí `WAHA_API_KEY` no container vira o hash. Não confundir os dois.
+- Documentação canônica: `docs/runbooks/waha-local.md` (§4.3).
+
 ## Diagnóstico (sempre nesta ordem — caminho real primeiro)
 
 1. `docker ps -a` — quais containers existem e em que estado.

@@ -19,7 +19,26 @@ serviços e cerca de 150 MB por número de WhatsApp conectado —, e isso não m
 
 ### Corrigido
 
-- **O agente de IA nunca recebia atualização.** O worker — o processo que faz o agente
+- **Rota DELETE de canal agora trata corretamente variáveis WAHA fora de bloco `if`.**
+  Nas versões anteriores, as variáveis `wahaLogoutOk`, `wahaDeleteOk`, `wahaLogoutError`,
+  `wahaDeleteError` eram declaradas com `let` dentro do bloco `if (session.provider ===
+  CHANNEL_PROVIDER_WAHA)` mas referenciadas nas funções `audit()` e no `return ok()` fora
+  dele. Isso causava `ReferenceError: wahaLogoutOk is not defined` em 9 de 19 testes.
+  Corrigido declarando-as no escopo da função logo antes do `if`.
+
+- **Mock `wahaFriendlyError` em route.test.ts não manejava Error objects.**
+  O mock `(m: string) => m` não capturava mensagens de erro corretamente. Corrigido para
+  `(err: unknown) => (err instanceof Error ? err.message : String(err))`, permitindo que
+  erros reais fossem transformados em strings legíveis.
+
+- **Autenticação WAHA agora usa plaintext direto no build `noweb`.**
+  O `docker-compose.yml` e o `docker-compose.override.yml` passam `WAHA_API_KEY` como
+  plaintext (não SHA512 hash). O `.env.local` contém o plaintext. O cliente envia
+  `X-Api-Key` com o mesmo valor. O build WAHA `noweb` compara o header diretamente
+  contra a chave plaintext. Isso resolve `401 Unauthorized` que afetava 11 de 19
+  testes de rota. O teste final passou com 19/19.
+
+### ⚠️ Requer atenção
   atender 24 horas por dia — era compilado dentro do seu servidor no dia da instalação, e
   nenhuma atualização o reconstruía. Na prática: você atualizava o CRM, o site mudava, e o
   agente continuava rodando exatamente o código do dia em que você instalou, para sempre.

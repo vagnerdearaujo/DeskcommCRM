@@ -5,11 +5,14 @@
 #
 # Uso:
 #   1. Copie .env.example -> .env.local e preencha WAHA_API_KEY (plaintext)
-#   2. Gere o hash: echo -n "$WAHA_API_KEY" | shasum -a 512 | awk '{print $1}'
-#   3. Cole esse hash em WAHA_API_KEY abaixo (NÃO o plaintext)
-#   4. docker compose up -d
-#   5. Acesse http://localhost:3030/dashboard/ (UI do WAHA Plus)
+#   2. docker compose up -d
+#   3. Acesse http://localhost:3030/dashboard/ (UI do WAHA)
 #      (host port 3030 — :3000 fica reservado pra outros dev tools como Remotion)
+#
+# Auth WAHA (DEV, build noweb): o container compara o header X-Api-Key DIRETAMENTE
+# contra WAHA_API_KEY (plaintext). NÃO use hash SHA512 aqui — isso é do build WAHA
+# Plus. O .env.local mantém WAHA_API_KEY_SHA512 só por legado; o override limpa
+# essa var no container. Se trocar o image para waha-plus, aí sim use o hash.
 #
 # Em prod, WAHA roda em VPS dedicada (Hostgator) atrás de Nginx (proxy_buffering off
 # pra SSE). docker-compose aqui é DEV ONLY.
@@ -25,7 +28,8 @@ services:
     ports:
       - "3030:3000"
     environment:
-      # Hash SHA512 hex da api key (NÃO plaintext). Cliente envia plaintext em X-Api-Key.
+      # Build noweb: compara o header X-Api-Key DIRETAMENTE contra WAHA_API_KEY
+      # (plaintext). NÃO é hash. O override limpa WAHA_API_KEY_SHA512.
       WAHA_API_KEY: ${WAHA_API_KEY}
       # Webhook base URL — precisa ser pública (use ngrok/cloudflared em dev).
       # host.docker.internal: o app Next roda no HOST em dev — localhost dentro do
