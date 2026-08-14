@@ -33,7 +33,7 @@ vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn() }));
 vi.mock("@/lib/audit", () => ({ audit: vi.fn(async () => undefined) }));
 vi.mock("@/lib/waha/client", () => ({
   getWahaClient: vi.fn(),
-  wahaFriendlyError: (m: string) => m,
+  wahaFriendlyError: (err: unknown) => (err instanceof Error ? err.message : String(err)),
 }));
 
 const ORG = "22222222-2222-4222-8222-222222222222";
@@ -374,27 +374,50 @@ describe("DELETE /api/v1/channel-sessions/[id]", () => {
     expect((await DELETE(reqDelete(), ctx())).status).toBe(200);
   });
 
-  /** Falha FECHADA: 200 sem revogar prometia uma desconexão que não aconteceu. */
-  it("canal por QR sem o transporte no ar → 503 e NENHUMA escrita", async () => {
+  /**
+   * Best-effort: transporte ausente NÃO deve bloquear o delete local. A linha é
+   * apagada e o response avisa (em waha_cleanup) que a desconexão do aparelho
+   * não ocorreu — em vez de travar o usuário num 503.
+   */
+  it("canal por QR sem o transporte no ar → apaga a linha e avisa (200, waha_cleanup.not_configured)", async () => {
     authOk();
     const db = makeDb();
     vi.mocked(getWahaClient).mockReturnValue(null);
     const { DELETE } = await import("./route");
     const res = await DELETE(reqDelete(), ctx());
 
-    expect(res.status).toBe(503);
-    expect(db.escritas).toEqual([]);
-    expect(audit).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(db.escritas).toHaveLength(1);
+    expect(db.escritas[0]).toMatchObject({ tipo: "delete", table: "channel_sessions" });
+    expect(audit).toHaveBeenCalledWith(expect.objectContaining({ action: "channel.deleted" }));
+    const body = await res.json();
+    expect(body.data.waha_cleanup).toEqual({
+      logout_ok: false,
+      logout_error: "waha_not_configured",
+      delete_ok: false,
+      delete_error: "waha_not_configured",
+    });
   });
 
-  it("transporte recusa a revogação → 502 e NENHUMA escrita", async () => {
+  /**
+   * Best-effort: falha no transporte (500) NÃO bloqueia o delete local. A linha é
+   * apagada; o logout falhou mas o delete de sessão (tentado em separado) prossegue.
+   */
+  it("transporte recusa a revogação (500) → apaga a linha e reporta falha no waha_cleanup", async () => {
     authOk();
     const db = makeDb();
     const waha = wahaOk(db);
     waha.logoutSession.mockRejectedValue(new Error("waha_logout_500"));
     const { DELETE } = await import("./route");
-    expect((await DELETE(reqDelete(), ctx())).status).toBe(502);
-    expect(db.escritas).toEqual([]);
+    const res = await DELETE(reqDelete(), ctx());
+
+    expect(res.status).toBe(200);
+    expect(db.escritas).toHaveLength(1);
+    expect(db.escritas[0]).toMatchObject({ tipo: "delete", table: "channel_sessions" });
+    const body = await res.json();
+    expect(body.data.waha_cleanup.logout_ok).toBe(false);
+    expect(body.data.waha_cleanup.logout_error).toContain("waha_logout_500");
+    expect(body.data.waha_cleanup.delete_ok).toBe(true);
   });
 
   it("canal de outra organização → 404, nenhuma escrita, nenhuma revogação", async () => {

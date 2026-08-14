@@ -300,22 +300,37 @@ export async function DELETE(
     last_status_change_at: now,
   };
 
+  let wahaLogoutOk = true;
+  let wahaDeleteOk = true;
+  let wahaLogoutError: string | null = null;
+  let wahaDeleteError: string | null = null;
+
   if (session.provider === CHANNEL_PROVIDER_WAHA) {
     const waha = getWahaClient();
+
     if (!waha) {
-      return fail(
-        "waha_not_configured",
-        "O WhatsApp (WAHA) não está configurado neste ambiente (faltam WAHA_API_BASE_URL e/ou WAHA_API_KEY) — sem ele o número não pode ser desconectado do aparelho.",
-        503,
-        { requestId },
-      );
+      // WAHA não configurado no env — faz o delete local mesmo assim.
+      // O usuário será avisado de que a desconexão do aparelho não foi feita.
+      wahaLogoutOk = false;
+      wahaDeleteOk = false;
+      wahaLogoutError = "waha_not_configured";
+      wahaDeleteError = "waha_not_configured";
+    } else {
+      try {
+        await waha.logoutSession(session.waha_session_name as string);
+      } catch (err) {
+        wahaLogoutOk = false;
+        wahaLogoutError = wahaFriendlyError(err);
+      }
+      try {
+        await waha.deleteSession(session.waha_session_name as string);
+      } catch (err) {
+        wahaDeleteOk = false;
+        wahaDeleteError = wahaFriendlyError(err);
+      }
     }
-    try {
-      await waha.logoutSession(session.waha_session_name as string);
-      await waha.deleteSession(session.waha_session_name as string);
-    } catch (err) {
-      return fail("waha_error", wahaFriendlyError(err), 502, { requestId });
-    }
+    // Não lançamos erro nem abortamos: prosseguimos com o delete/local update.
+    // O response inclui metadados sobre o estado do cleanup do WAHA.
   } else {
     // Revogação do canal oficial: a credencial some e a URL do webhook muda, então
     // o que a plataforma tem configurado do outro lado deixa de valer. Só faz
@@ -353,8 +368,35 @@ export async function DELETE(
       provider: session.provider,
       ...impact.history,
       ...impact.configuration,
+      ...(session.provider === CHANNEL_PROVIDER_WAHA
+        ? {
+            waha_cleanup: {
+              logout_ok: wahaLogoutOk,
+              logout_error: wahaLogoutError,
+              delete_ok: wahaDeleteOk,
+              delete_error: wahaDeleteError,
+            },
+          }
+        : {}),
     },
   });
 
-  return ok({ id, archived: arquivar, impact }, { requestId });
+  return ok(
+    {
+      id,
+      archived: arquivar,
+      impact,
+      ...(session.provider === CHANNEL_PROVIDER_WAHA
+        ? {
+            waha_cleanup: {
+              logout_ok: wahaLogoutOk,
+              logout_error: wahaLogoutError,
+              delete_ok: wahaDeleteOk,
+              delete_error: wahaDeleteError,
+            },
+          }
+        : {}),
+    },
+    { requestId },
+  );
 }
