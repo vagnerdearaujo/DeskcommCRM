@@ -4,7 +4,7 @@
  * Pré-condições (ambiente que simula o kit self-host):
  *   - banco zerado do baseline.sql (Supabase local pg17)
  *   - primeiro usuário criado via scripts/bootstrap-owner.ts (como o install.sh)
- *   - WAHA ativo, Redis local, RESEND_API_KEY VAZIO (realidade da VPS fresca)
+ *   - WAHA ativo, Redis local, BREVO_SMTP_* VAZIOS (realidade da VPS fresca)
  *   - app em produção (next build + next start) na E2E_PORT
  *
  * Casos: J1.1–J1.13 do docs/testing/user-journey-map.md. Tudo pelo frontend;
@@ -191,14 +191,14 @@ test.describe("J1 — onboarding do dono numa instalação fresca", () => {
     expect(agents?.[0]).toMatchObject({ name: "Tomik QA", is_active: true, is_default: true });
   });
 
-  test("J1.8 convite SEM Resend: a UI não pode mentir que enviou email", async ({ page }) => {
+  test("J1.8 convite SEM Brevo SMTP: a UI não pode mentir que enviou email", async ({ page }) => {
     await login(page);
     await page.waitForURL(/\/onboarding\/invite-team/);
 
     await page.locator("#emails").fill("atendente@qa.local");
     await page.getByRole("button", { name: /enviar convites/i }).click();
 
-    // Honestidade: sem RESEND_API_KEY nenhum email sai. A UI deve dizer isso
+    // Honestidade: sem BREVO_SMTP_* nenhum email sai. A UI deve dizer isso
     // e oferecer o link de aceite copiável (nunca redirecionar em silêncio).
     await expect(page.getByText(/não está configurado neste servidor/i)).toBeVisible({
       timeout: 15_000,
@@ -211,7 +211,7 @@ test.describe("J1 — onboarding do dono numa instalação fresca", () => {
       path.join(process.cwd(), ".e2e-invite-url.json"),
       JSON.stringify({ email: "atendente@qa.local", accept_url: acceptUrl }, null, 2),
     );
-    await snap(page, "j1.8-convite-sem-resend");
+    await snap(page, "j1.8-convite-sem-brevo");
 
     // e o wizard segue em frente conscientemente
     await page.getByRole("button", { name: /^continuar$/i }).click();

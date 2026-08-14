@@ -1,4 +1,4 @@
-import { isEmailConfigured } from "@/lib/email/resend";
+import { isEmailConfigured } from "@/lib/email/brevo";
 import { InviteTeamForm } from "./_form";
 
 export const dynamic = "force-dynamic";
@@ -15,10 +15,10 @@ export default function InviteTeamPage() {
       </header>
       {!emailReady ? (
         <div className="rounded-md border border-amber-300/60 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-100">
-          <p className="font-medium">Resend não configurado.</p>
+          <p className="font-medium">SMTP Brevo não configurado.</p>
           <p className="mt-1">
             Convites serão registrados localmente, mas o email não será enviado. Configure
-            <code className="mx-1">RESEND_API_KEY</code> para envio real.
+            <code className="mx-1">BREVO_SMTP_USER</code> e <code className="mx-1">BREVO_SMTP_PASS</code> para envio real.
           </p>
         </div>
       ) : null}

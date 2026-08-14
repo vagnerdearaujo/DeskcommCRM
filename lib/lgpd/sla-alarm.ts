@@ -13,7 +13,7 @@
 import * as Sentry from "@sentry/nextjs";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { sendEmail } from "@/lib/email/resend";
+import { sendEmail } from "@/lib/email/brevo";
 import { audit } from "@/lib/audit";
 import { env } from "@/lib/env";
 import type { LgpdRequest } from "./types";

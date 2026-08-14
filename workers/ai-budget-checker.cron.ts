@@ -16,7 +16,7 @@
  * emitted from this TS worker, never from `fn_update_budget_consumption`.
  */
 import { createAdminClient } from "@/lib/supabase/admin";
-import { sendEmail } from "@/lib/email/resend";
+import { sendEmail } from "@/lib/email/brevo";
 import { buildBudgetAlarmEmail } from "@/lib/email/templates/ai-budget-alarm";
 
 interface BudgetRow {

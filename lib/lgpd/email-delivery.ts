@@ -1,5 +1,5 @@
 /**
- * LGPD export email delivery (Resend).
+ * LGPD export email delivery (Brevo SMTP).
  *
  * NEVER logs the recipient address in plaintext (CLAUDE.md §LGPD L-08).
  * Only sha256(email) appears in logs/audit metadata.
@@ -7,18 +7,18 @@
 
 import { createHash } from "node:crypto";
 
-import { sendEmail } from "@/lib/email/resend";
+import { sendEmail } from "@/lib/email/brevo";
 
 export class EmailNotConfigured extends Error {
   constructor() {
-    super("RESEND_API_KEY missing or invalid");
+    super("BREVO_SMTP_* missing or invalid");
     this.name = "EmailNotConfigured";
   }
 }
 
 export class EmailSendFailed extends Error {
   constructor(detail: string) {
-    super(`Resend send failed: ${detail}`);
+    super(`Brevo SMTP send failed: ${detail}`);
     this.name = "EmailSendFailed";
   }
 }
