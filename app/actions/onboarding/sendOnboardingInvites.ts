@@ -13,6 +13,7 @@ import { z } from "zod";
 
 import { audit } from "@/lib/audit";
 import { env } from "@/lib/env";
+import { marcaDaSaida } from "@/lib/branding/saida";
 import { signInviteToken, INVITE_TTL_SECONDS } from "@/lib/auth/invite-token";
 import { buildInviteEmail } from "@/lib/email/templates/invite";
 import { sendEmail } from "@/lib/email/brevo";
@@ -89,12 +90,14 @@ export async function sendOnboardingInvites(payload: InvitePayload): Promise<Sen
     });
     const acceptUrl = `${baseUrl.replace(/\/$/, "")}/team/accept-invite/${token}`;
     const expiresAt = new Date(exp * 1000);
+    const marca = await marcaDaSaida(ctx.orgId);
     const { subject, html, text } = buildInviteEmail({
       inviterName,
       orgName: ctx.orgName,
       acceptUrl,
       role: inv.role,
       expiresAt,
+      marca,
     });
     const result = await sendEmail({
       to: email,

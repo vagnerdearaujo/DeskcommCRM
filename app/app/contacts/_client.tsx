@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Plus, MagnifyingGlass } from "@/lib/ui/icons";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ import { ContactsTable } from "@/components/contacts/ContactsTable";
 import { NewContactDialog } from "@/components/contacts/NewContactDialog";
 import { CsvImportDialog } from "@/components/contacts/CsvImportDialog";
 import { EmptyContacts } from "@/components/empty";
+import type { ContactOrderBy } from "@/lib/schemas/contacts";
 
 const SOURCE_OPTIONS = [
   { value: undefined, label: "Todas as origens" },
@@ -26,16 +27,22 @@ const SOURCE_OPTIONS = [
   { value: "nuvemshop", label: "Nuvemshop" },
 ];
 
+const PAGE_SIZE_OPTIONS = [25, 50, 100] as const;
+
 export function ContactsListClient() {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [tag, setTag] = useState<string | undefined>(undefined);
   const [source, setSource] = useState<string | undefined>(undefined);
+  // G9-07: por padrão, esconde contatos criados automaticamente via WhatsApp.
+  // S-23.xx: ordenação e paginação vindas do upstream.
   const [showInbox, setShowInbox] = useState(false);
+  const [orderBy, setOrderBy] = useState<ContactOrderBy>("last_activity_at");
+  const [orderDir, setOrderDir] = useState<"asc" | "desc">("desc");
+  const [limit, setLimit] = useState<number>(25);
   const [createOpen, setCreateOpen] = useState(false);
   const [csvOpen, setCsvOpen] = useState(false);
 
-  // Debounce search 250ms
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput), 250);
     return () => clearTimeout(t);
@@ -46,10 +53,12 @@ export function ContactsListClient() {
       search,
       tag,
       source,
-      // G9-07: por padrão, esconde contatos criados automaticamente via WhatsApp
       exclude_source: showInbox ? undefined : "whatsapp",
+      order_by: orderBy,
+      order_dir: orderDir,
+      limit,
     }),
-    [search, tag, source, showInbox],
+    [search, tag, source, showInbox, orderBy, orderDir, limit],
   );
   const q = useContactList(filters);
 
@@ -64,6 +73,18 @@ export function ContactsListClient() {
     return Array.from(set).sort();
   }, [allContacts]);
 
+  const handleSort = useCallback(
+    (column: ContactOrderBy) => {
+      if (column === orderBy) {
+        setOrderDir((d) => (d === "asc" ? "desc" : "asc"));
+      } else {
+        setOrderBy(column);
+        setOrderDir(column === "display_name" ? "asc" : "desc");
+      }
+    },
+    [orderBy],
+  );
+
   return (
     <div className="space-y-4 p-6">
       <header className="flex items-center justify-between gap-4">
@@ -71,19 +92,19 @@ export function ContactsListClient() {
           <h1 className="text-2xl font-semibold tracking-tight">Contatos</h1>
           <p className="text-sm text-muted-foreground">
             Customer 360 — busque, filtre e gerencie contatos.
-          </p>
-        </div>
+         </p>
+       </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={() => setCsvOpen(true)}>
             <MagnifyingGlass size={16} weight="bold" aria-hidden className="rotate-90" />
             <span>Importar CSV</span>
-          </Button>
+         </Button>
           <Button onClick={() => setCreateOpen(true)}>
             <Plus size={16} weight="bold" aria-hidden />
             <span>Novo contato</span>
-          </Button>
-        </div>
-      </header>
+         </Button>
+       </div>
+     </header>
 
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface p-2">
         <div className="relative">
@@ -99,14 +120,14 @@ export function ContactsListClient() {
             onChange={(e) => setSearchInput(e.target.value)}
             className="h-9 w-72 pl-8"
           />
-        </div>
+       </div>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm" disabled={tagOptions.length === 0}>
               {tag ? `Tag: ${tag}` : "Tag: todas"}
-            </Button>
-          </DropdownMenuTrigger>
+           </Button>
+         </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
             <DropdownMenuLabel>Tag</DropdownMenuLabel>
             <DropdownMenuSeparator />
@@ -114,25 +135,25 @@ export function ContactsListClient() {
             {tagOptions.map((t) => (
               <DropdownMenuItem key={t} onClick={() => setTag(t)}>
                 {t}
-              </DropdownMenuItem>
+             </DropdownMenuItem>
             ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+         </DropdownMenuContent>
+       </DropdownMenu>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm">
               {SOURCE_OPTIONS.find((s) => s.value === source)?.label ?? "Origem"}
-            </Button>
-          </DropdownMenuTrigger>
+           </Button>
+         </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
             {SOURCE_OPTIONS.map((s) => (
               <DropdownMenuItem key={s.label} onClick={() => setSource(s.value)}>
                 {s.label}
-              </DropdownMenuItem>
+             </DropdownMenuItem>
             ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+         </DropdownMenuContent>
+       </DropdownMenu>
 
         <Button
           variant={showInbox ? "default" : "outline"}
@@ -140,7 +161,24 @@ export function ContactsListClient() {
           onClick={() => setShowInbox(!showInbox)}
         >
           {showInbox ? "Ocultar WhatsApp" : "Mostrar WhatsApp"}
-        </Button>
+       </Button>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm">
+              {limit} por página
+           </Button>
+         </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuLabel>Itens por página</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {PAGE_SIZE_OPTIONS.map((n) => (
+              <DropdownMenuItem key={n} onClick={() => setLimit(n)}>
+                {n}
+             </DropdownMenuItem>
+            ))}
+         </DropdownMenuContent>
+       </DropdownMenu>
 
         {(search || tag || source) && (
           <Button
@@ -154,19 +192,19 @@ export function ContactsListClient() {
             }}
           >
             Limpar filtros
-          </Button>
+         </Button>
         )}
-      </div>
+     </div>
 
       {q.isLoading ? (
         <div className="space-y-2">
           {[1, 2, 3, 4, 5].map((i) => (
             <Skeleton key={i} className="h-12 w-full" />
           ))}
-        </div>
+       </div>
       ) : q.isError ? (
         <Card className="p-6 text-center">
-          <p className="text-sm text-error-fg">Erro ao carregar contatos.</p>
+          <p className="text-sm text-error-fg">Erro ao carregar contatos</p>
           <Button
             size="sm"
             variant="outline"
@@ -174,19 +212,28 @@ export function ContactsListClient() {
             onClick={() => q.refetch()}
           >
             Tentar novamente
-          </Button>
-        </Card>
+         </Button>
+       </Card>
       ) : allContacts.length === 0 ? (
         <Card className="p-2">
           <EmptyContacts />
-        </Card>
+       </Card>
       ) : (
         <>
           <Card className="overflow-hidden">
-            <ContactsTable contacts={allContacts} />
-          </Card>
-          {q.hasNextPage && (
-            <div className="flex justify-center">
+            <ContactsTable
+              contacts={allContacts}
+              orderBy={orderBy}
+              orderDir={orderDir}
+              onSort={handleSort}
+            />
+         </Card>
+          <div className="flex flex-col items-center gap-2 sm:flex-row sm:justify-between">
+            <p className="text-sm text-muted-foreground">
+              {allContacts.length} contato{allContacts.length === 1 ? "" : "s"}
+              {q.hasNextPage ? " carregados — há mais resultados" : ""}
+           </p>
+            {q.hasNextPage && (
               <Button
                 variant="outline"
                 size="sm"
@@ -194,14 +241,14 @@ export function ContactsListClient() {
                 disabled={q.isFetchingNextPage}
               >
                 {q.isFetchingNextPage ? "Carregando…" : "Carregar mais"}
-              </Button>
-            </div>
-          )}
+             </Button>
+            )}
+         </div>
         </>
       )}
 
       <NewContactDialog open={createOpen} onOpenChange={setCreateOpen} />
       <CsvImportDialog open={csvOpen} onOpenChange={setCsvOpen} />
-    </div>
+   </div>
   );
 }

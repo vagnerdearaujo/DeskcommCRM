@@ -3,7 +3,7 @@
  *
  * Behavior matrix:
  *  - Invalid/expired token         → render error
- *  - Unauthenticated user          → render CTA → login ou signup com email
+ *  - Unauthenticated user          → render CTA → /login?next=...
  *  - Authenticated, email mismatch → render mismatch + sign-out CTA
  *  - Authenticated, email match    → form posts to Server Action which inserts
  *                                    membership and redirects to /app/inbox
@@ -58,25 +58,33 @@ export default async function AcceptInvitePage({ params }: PageProps) {
   } = await supabase.auth.getUser();
 
   if (!user) {
+    const next = encodeURIComponent(`/team/accept-invite/${token}`);
     return (
       <Shell>
         <h1 className="text-xl font-semibold">Você foi convidado</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Para aceitar o convite como <strong>{payload.role}</strong>, faça login ou crie uma
-          conta com o email <strong>{payload.email}</strong>.
+          Para aceitar o convite como <strong>{payload.role}</strong>, faça login com o email{" "}
+          <strong>{payload.email}</strong>.
         </p>
-        <div className="mt-4 flex flex-col gap-3">
+        <div className="mt-4 flex flex-wrap items-center gap-3">
           <Link
-            href={`/login?next=${encodeURIComponent(`/team/accept-invite/${token}`)}`}
-            className="inline-block rounded-md bg-primary px-4 py-2 text-center text-sm font-medium text-primary-foreground"
+            href={`/login?next=${next}`}
+            className="inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
           >
             Fazer login
           </Link>
+          {/*
+            O caminho que faltava. Quem é convidado e ainda NÃO tem conta só
+            tinha "Fazer login" — então criava conta pelo caminho comum, e o
+            provisionamento, sem achar vínculo, abria uma empresa e o tornava
+            admin dela. O token viaja no link para que a conta nova já nasça
+            amarrada a este convite.
+          */}
           <Link
-            href={`/signup?invite=${token}&email=${encodeURIComponent(payload.email)}`}
-            className="inline-block rounded-md border px-4 py-2 text-center text-sm font-medium hover:bg-accent"
+            href={`/signup?invite=${encodeURIComponent(token)}`}
+            className="text-sm underline underline-offset-4"
           >
-            Criar conta com {payload.email}
+            Ainda não tenho conta
           </Link>
         </div>
       </Shell>

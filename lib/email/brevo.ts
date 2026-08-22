@@ -6,6 +6,8 @@ interface SendArgs {
   html: string;
   text?: string;
   replyTo?: string;
+  /** Nome exibido no remetente (opcional). O endereço continua o do .env. */
+  fromName?: string;
   tags?: { name: string; value: string }[];
 }
 
@@ -66,6 +68,13 @@ function fromAddress(): string {
   return process.env.RESEND_FROM_EMAIL || "DeskcommCRM <crm@vagnercoach.com.br>";
 }
 
+/** O endereço puro extraído de `Nome <email>` ou da string crua. */
+function fromEmailAddress(): string {
+  const raw = fromAddress();
+  const match = raw.match(/<([^>]+)>/);
+  return (match?.[1] ?? raw).trim();
+}
+
 export async function sendEmail(args: SendArgs): Promise<SendResult> {
   const transporter = getTransporter();
 
@@ -86,7 +95,9 @@ export async function sendEmail(args: SendArgs): Promise<SendResult> {
 
   try {
     const info = await transporter.sendMail({
-      from: fromAddress(),
+      from: args.fromName
+        ? `${args.fromName.replace(/[<>]/g, "").trim()} <${fromEmailAddress()}>`
+        : fromAddress(),
       to: Array.isArray(args.to) ? args.to.join(", ") : args.to,
       subject: args.subject,
       text: args.text,

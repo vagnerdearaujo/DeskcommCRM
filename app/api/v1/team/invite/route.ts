@@ -19,6 +19,7 @@ import { audit, isServiceRoleConfigured } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { inviteMemberSchema, validateRequest } from "@/lib/schemas";
+import { marcaDaSaida } from "@/lib/branding/saida";
 import { signInviteToken, INVITE_TTL_SECONDS } from "@/lib/auth/invite-token";
 import { buildInviteEmail } from "@/lib/email/templates/invite";
 import { sendEmail } from "@/lib/email/brevo";
@@ -103,6 +104,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     });
     const acceptUrl = `${baseUrl.replace(/\/$/, "")}/team/accept-invite/${token}`;
     const expiresAt = new Date(exp * 1000);
+    const marca = await marcaDaSaida(activeOrg.orgId);
 
     const { subject, html, text } = buildInviteEmail({
       inviterName,
@@ -110,6 +112,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       acceptUrl,
       role: inv.role,
       expiresAt,
+      marca,
     });
 
     const result = await sendEmail({

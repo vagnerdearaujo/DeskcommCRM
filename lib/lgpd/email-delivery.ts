@@ -8,6 +8,7 @@
 import { createHash } from "node:crypto";
 
 import { sendEmail } from "@/lib/email/brevo";
+import type { MarcaDeSaida } from "@/lib/branding/saida";
 
 export class EmailNotConfigured extends Error {
   constructor() {
@@ -33,11 +34,13 @@ interface SendArgs {
   signedUrl: string;
   expiresAt: Date;
   organizationName?: string;
+  /** Marca resolvida da organização (upstream) — usada como nome do remetente. */
+  marca?: MarcaDeSaida;
 }
 
 export async function sendExportEmail(args: SendArgs): Promise<{ messageId: string }> {
   const shortId = args.requestId.slice(0, 8);
-  const orgName = args.organizationName ?? "DeskcommCRM";
+  const orgName = args.organizationName ?? args.marca?.nome ?? "DeskcommCRM";
   const expiresFmt = args.expiresAt.toLocaleString("pt-BR", {
     timeZone: "America/Sao_Paulo",
   });
